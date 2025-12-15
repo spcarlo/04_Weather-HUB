@@ -11,11 +11,8 @@ st.title("Weather")
 st.caption("local weather analytics")
 
 
-with st.container():
-    st.subheader("Controls")
-    LOCATION_NAME = st.text_input("Location", value="Zürich")
-    DAYS_BACK = st.slider("Days back", min_value=5, max_value=60, value=20)
-
+LOCATION_NAME = st.text_input("Location", value="Zürich")
+DAYS_BACK = st.slider("Days back", min_value=5, max_value=60, value=20)
 
 TIMEZONE = "Europe/Zurich"
 
