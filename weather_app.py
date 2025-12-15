@@ -55,6 +55,21 @@ def fetch_daily(lat: float, lon: float, days_back: int, timezone: str) -> pd.Dat
     })
 
 
+def plot_daily(df: pd.DataFrame):
+    fig = plt.figure()
+    fig.patch.set_alpha(0)
+
+    plt.plot(df["date"], df["tmax"], label="Max temp")
+    plt.plot(df["date"], df["tmin"], label="Min temp")
+
+    ax = plt.gca()
+    ax.set_facecolor("none")
+
+    plt.legend()
+    plt.tight_layout()
+    st.pyplot(fig)
+
+
 def plot_daily_range(df: pd.DataFrame):
     fig = plt.figure()
     fig.patch.set_alpha(0)
@@ -74,20 +89,6 @@ def plot_daily_range(df: pd.DataFrame):
     plt.tight_layout()
     st.pyplot(fig)
 
-
-
-def plot_daily_range(df: pd.DataFrame):
-    fig = plt.figure()
-    fig.patch.set_alpha(0)
-
-    plt.plot(df["date"], df["range"], label="Daily range")
-
-    ax = plt.gca()
-    ax.set_facecolor("none")
-
-    plt.legend()
-    plt.tight_layout()
-    st.pyplot(fig)
 
 
 
