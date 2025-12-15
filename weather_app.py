@@ -145,9 +145,10 @@ df["tavg"] = (df["tmax"] + df["tmin"]) / 2
 show_metrics(df)
 
 TEMP_VIEW = st.radio(
-    "Daily temperature view",
+    "",
     ["Min / Max", "Average"],
-    horizontal=True
+    horizontal=True,
+    label_visibility="collapsed"
 )
 
 plot_daily(df, TEMP_VIEW)
