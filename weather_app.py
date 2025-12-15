@@ -74,6 +74,10 @@ def style_axes(ax):
     ax.xaxis.set_major_locator(mdates.MonthLocator())
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b"))
 
+    ax.yaxis.grid(True, linestyle="--", linewidth=0.5, alpha=0.4)
+    ax.xaxis.grid(False)
+
+
 
 def style_legend(legend):
     legend.set_frame_on(False)
