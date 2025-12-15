@@ -2,6 +2,8 @@ import requests
 import pandas as pd
 
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+
 
 
 import streamlit as st
@@ -63,6 +65,9 @@ def style_axes(ax):
     ax.spines["bottom"].set_color("gray")
     ax.tick_params(colors="gray")
 
+    ax.xaxis.set_major_locator(mdates.MonthLocator())
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b"))
+
 def plot_daily(df: pd.DataFrame):
     fig = plt.figure()
     fig.patch.set_alpha(0)
@@ -118,6 +123,7 @@ if st.button("Refresh data"):
 
 
 df = load_data(LOCATION_NAME, DAYS_BACK, TIMEZONE)
+df["date"] = pd.to_datetime(df["date"])
 df["range"] = df["tmax"] - df["tmin"]
 
 show_metrics(df)
