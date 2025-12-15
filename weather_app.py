@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import streamlit as st
 from datetime import date, timedelta
 
-st.title("Weather HUB")
+st.title("Weather")
 st.caption("Local weather overview")
 
 LOCATION_NAME = st.text_input("Location", value="Zürich")
