@@ -55,6 +55,14 @@ def fetch_daily(lat: float, lon: float, days_back: int, timezone: str) -> pd.Dat
     })
 
 
+def style_axes(ax):
+    ax.set_facecolor("none")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("gray")
+    ax.spines["bottom"].set_color("gray")
+    ax.tick_params(colors="gray")
+
 def plot_daily(df: pd.DataFrame):
     fig = plt.figure()
     fig.patch.set_alpha(0)
@@ -63,7 +71,7 @@ def plot_daily(df: pd.DataFrame):
     plt.plot(df["date"], df["tmin"], label="Min temp")
 
     ax = plt.gca()
-    ax.set_facecolor("none")
+    style_axes(ax)
 
     plt.legend()
     plt.tight_layout()
@@ -77,13 +85,7 @@ def plot_daily_range(df: pd.DataFrame):
     plt.plot(df["date"], df["range"], label="Daily range")
 
     ax = plt.gca()
-    ax.set_facecolor("none")
-
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    ax.spines["left"].set_color("gray")
-    ax.spines["bottom"].set_color("gray")
-    ax.tick_params(colors="gray")
+    style_axes(ax)
 
     plt.legend()
     plt.tight_layout()
