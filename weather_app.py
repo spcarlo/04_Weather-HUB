@@ -72,14 +72,6 @@ def plot_daily_range(df: pd.DataFrame):
     plt.tight_layout()
     st.pyplot(fig)
 
-def plot_side_by_side(df, left_plot, right_plot):
-    col1, col2 = st.columns(2)
-
-    with col1:
-        left_plot(df)
-
-    with col2:
-        right_plot(df)
 
 
 def show_metrics(df: pd.DataFrame):
@@ -109,5 +101,5 @@ df = load_data(LOCATION_NAME, DAYS_BACK, TIMEZONE)
 df["range"] = df["tmax"] - df["tmin"]
 
 show_metrics(df)
-plot_side_by_side(df, plot_daily, plot_daily_range)
-
+plot_daily(df)
+plot_daily_range(df)
