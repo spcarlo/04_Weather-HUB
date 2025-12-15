@@ -1,6 +1,5 @@
 import requests
 import pandas as pd
-import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import streamlit as st
@@ -13,10 +12,8 @@ st.title("Weather")
 st.caption("local weather analytics")
 
 LOCATION_NAME = st.text_input("Location", value="Zürich")
-DAYS_BACK = st.slider("Days back", min_value=5, max_value=400, value=30)
+DAYS_BACK = st.slider("Days back", min_value=5, max_value=400, value=60)
 TIMEZONE = "Europe/Zurich"
-
-sns.set_theme(style="whitegrid")
 
 # -------------------------------
 # Data helpers
@@ -64,11 +61,30 @@ def load_data(name: str, days_back: int, timezone: str) -> pd.DataFrame:
     return fetch_daily(lat, lon, days_back, timezone)
 
 # -------------------------------
+# Plot styling
+# -------------------------------
+def style_axes(ax):
+    ax.set_facecolor("none")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("gray")
+    ax.spines["bottom"].set_color("gray")
+    ax.tick_params(colors="gray")
+
+    ax.xaxis.set_major_locator(mdates.MonthLocator())
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b"))
+
+
+def style_legend(legend):
+    legend.set_frame_on(False)
+    for text in legend.get_texts():
+        text.set_color("gray")
+
+# -------------------------------
 # Metrics
 # -------------------------------
 def show_metrics(df: pd.DataFrame):
     col1, col2, col3 = st.columns(3)
-
     col1.metric("Min temp (°C)", f"{df['tmin'].min():.1f}")
     col2.metric("Max temp (°C)", f"{df['tmax'].max():.1f}")
     col3.metric("Avg daily range (°C)", f"{(df['tmax'] - df['tmin']).mean():.1f}")
@@ -77,33 +93,35 @@ def show_metrics(df: pd.DataFrame):
 # Plots
 # -------------------------------
 def plot_daily(df: pd.DataFrame):
-    fig, ax = plt.subplots()
+    fig = plt.figure()
+    fig.patch.set_alpha(0)
 
-    sns.lineplot(data=df, x="date", y="tmax", label="Max temp", ax=ax)
-    sns.lineplot(data=df, x="date", y="tmin", label="Min temp", ax=ax)
+    plt.plot(df["date"], df["tmax"], label="Max temp")
+    plt.plot(df["date"], df["tmin"], label="Min temp")
 
-    ax.xaxis.set_major_locator(mdates.MonthLocator())
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b"))
+    ax = plt.gca()
+    style_axes(ax)
 
-    ax.set_xlabel("")
-    ax.set_ylabel("°C")
-    sns.despine(ax=ax)
+    legend = plt.legend()
+    style_legend(legend)
 
+    plt.tight_layout()
     st.pyplot(fig)
 
 
 def plot_daily_range(df: pd.DataFrame):
-    fig, ax = plt.subplots()
+    fig = plt.figure()
+    fig.patch.set_alpha(0)
 
-    sns.lineplot(data=df, x="date", y="range", label="Daily range", ax=ax)
+    plt.plot(df["date"], df["range"], label="Daily range")
 
-    ax.xaxis.set_major_locator(mdates.MonthLocator())
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%b"))
+    ax = plt.gca()
+    style_axes(ax)
 
-    ax.set_xlabel("")
-    ax.set_ylabel("°C")
-    sns.despine(ax=ax)
+    legend = plt.legend()
+    style_legend(legend)
 
+    plt.tight_layout()
     st.pyplot(fig)
 
 # -------------------------------
@@ -119,4 +137,3 @@ df["range"] = df["tmax"] - df["tmin"]
 show_metrics(df)
 plot_daily(df)
 plot_daily_range(df)
-
