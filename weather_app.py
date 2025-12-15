@@ -12,7 +12,7 @@ st.caption("local weather analytics")
 
 
 LOCATION_NAME = st.text_input("Location", value="Zürich")
-DAYS_BACK = st.slider("Days back", min_value=5, max_value=60, value=20)
+DAYS_BACK = st.slider("Days back", min_value=5, max_value=600, value=30)
 
 TIMEZONE = "Europe/Zurich"
 
@@ -72,6 +72,16 @@ def plot_daily_range(df: pd.DataFrame):
     plt.tight_layout()
     st.pyplot(fig)
 
+def plot_side_by_side(df, left_plot, right_plot):
+    col1, col2 = st.columns(2)
+
+    with col1:
+        left_plot(df)
+
+    with col2:
+        right_plot(df)
+
+
 def show_metrics(df: pd.DataFrame):
     col1, col2, col3 = st.columns(3)
 
@@ -99,5 +109,5 @@ df = load_data(LOCATION_NAME, DAYS_BACK, TIMEZONE)
 df["range"] = df["tmax"] - df["tmin"]
 
 show_metrics(df)
-plot_daily(df)
-plot_daily_range(df)
+plot_side_by_side(df, plot_daily, plot_daily_range)
+
