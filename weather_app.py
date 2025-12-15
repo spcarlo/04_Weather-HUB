@@ -15,12 +15,6 @@ LOCATION_NAME = st.text_input("Location", value="Zürich")
 DAYS_BACK = st.slider("Days back", min_value=5, max_value=400, value=60)
 TIMEZONE = "Europe/Zurich"
 
-TEMP_VIEW = st.selectbox(
-    "Temperature view",
-    ["Min / Max", "Average"]
-)
-
-
 # -------------------------------
 # Data helpers
 # -------------------------------
@@ -141,8 +135,6 @@ def plot_daily_range(df: pd.DataFrame):
 # -------------------------------
 # Run
 # -------------------------------
-if st.button("Refresh data"):
-    st.cache_data.clear()
 
 df = load_data(LOCATION_NAME, DAYS_BACK, TIMEZONE)
 df["date"] = pd.to_datetime(df["date"])
@@ -151,5 +143,12 @@ df["tavg"] = (df["tmax"] + df["tmin"]) / 2
 
 
 show_metrics(df)
+
+TEMP_VIEW = st.radio(
+    "Daily temperature view",
+    ["Min / Max", "Average"],
+    horizontal=True
+)
+
 plot_daily(df, TEMP_VIEW)
 plot_daily_range(df)
