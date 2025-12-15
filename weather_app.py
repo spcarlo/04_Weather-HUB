@@ -15,6 +15,12 @@ LOCATION_NAME = st.text_input("Location", value="Zürich")
 DAYS_BACK = st.slider("Days back", min_value=5, max_value=400, value=60)
 TIMEZONE = "Europe/Zurich"
 
+TEMP_VIEW = st.selectbox(
+    "Temperature view",
+    ["Min / Max", "Average"]
+)
+
+
 # -------------------------------
 # Data helpers
 # -------------------------------
@@ -96,12 +102,15 @@ def show_metrics(df: pd.DataFrame):
 # -------------------------------
 # Plots
 # -------------------------------
-def plot_daily(df: pd.DataFrame):
+def plot_daily(df: pd.DataFrame, view: str):
     fig = plt.figure()
     fig.patch.set_alpha(0)
 
-    plt.plot(df["date"], df["tmax"], label="Max temp")
-    plt.plot(df["date"], df["tmin"], label="Min temp")
+    if view == "Min / Max":
+        plt.plot(df["date"], df["tmax"], label="Max temp")
+        plt.plot(df["date"], df["tmin"], label="Min temp")
+    else:
+        plt.plot(df["date"], df["tavg"], label="Average temp")
 
     ax = plt.gca()
     style_axes(ax)
@@ -111,6 +120,7 @@ def plot_daily(df: pd.DataFrame):
 
     plt.tight_layout()
     st.pyplot(fig)
+
 
 
 def plot_daily_range(df: pd.DataFrame):
@@ -137,7 +147,9 @@ if st.button("Refresh data"):
 df = load_data(LOCATION_NAME, DAYS_BACK, TIMEZONE)
 df["date"] = pd.to_datetime(df["date"])
 df["range"] = df["tmax"] - df["tmin"]
+df["tavg"] = (df["tmax"] + df["tmin"]) / 2
+
 
 show_metrics(df)
-plot_daily(df)
+plot_daily(df, TEMP_VIEW)
 plot_daily_range(df)
