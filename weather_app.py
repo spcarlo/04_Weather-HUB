@@ -14,7 +14,7 @@ st.caption("local weather analytics")
 
 
 LOCATION_NAME = st.text_input("Location", value="Zürich")
-DAYS_BACK = st.slider("Days back", min_value=5, max_value=600, value=30)
+DAYS_BACK = st.slider("Days back", min_value=5, max_value=400, value=30)
 
 TIMEZONE = "Europe/Zurich"
 
@@ -68,6 +68,12 @@ def style_axes(ax):
     ax.xaxis.set_major_locator(mdates.MonthLocator())
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b"))
 
+def style_legend(legend):
+    legend.set_frame_on(False)
+    for text in legend.get_texts():
+        text.set_color("gray")
+
+
 def plot_daily(df: pd.DataFrame):
     fig = plt.figure()
     fig.patch.set_alpha(0)
@@ -78,7 +84,8 @@ def plot_daily(df: pd.DataFrame):
     ax = plt.gca()
     style_axes(ax)
 
-    plt.legend()
+    legend = plt.legend()
+    style_legend(legend)
     plt.tight_layout()
     st.pyplot(fig)
 
@@ -92,7 +99,8 @@ def plot_daily_range(df: pd.DataFrame):
     ax = plt.gca()
     style_axes(ax)
 
-    plt.legend()
+    legend = plt.legend()
+    style_legend(legend)
     plt.tight_layout()
     st.pyplot(fig)
 
