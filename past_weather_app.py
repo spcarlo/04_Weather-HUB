@@ -175,7 +175,7 @@ def show_metrics(df: pd.DataFrame):
 # -------------------------------
 # Plots
 # -------------------------------
-def apply_layout(fig, x_min, x_max, y_title: str, t: int):
+def apply_layout(fig, x_min, x_max, y_title: str, t: int, y_step: int):
     fig.update_layout(
         margin=dict(l=10, r=10, t=t, b=10),
         hovermode="x unified",
@@ -183,8 +183,28 @@ def apply_layout(fig, x_min, x_max, y_title: str, t: int):
         yaxis_title=y_title,
         showlegend=False,
     )
+
     fig.update_xaxes(showgrid=True, range=[x_min, x_max])
-    fig.update_yaxes(showgrid=True)
+
+    # snap y range to step
+    all_y = []
+    for trace in fig.data:
+        if hasattr(trace, "y") and trace.y is not None:
+            all_y.extend(trace.y)
+
+    y_min = min(all_y)
+    y_max = max(all_y)
+
+    y_floor = int((y_min // y_step) * y_step)
+    y_ceil = int(((y_max + y_step - 1) // y_step) * y_step)
+
+    fig.update_yaxes(
+        showgrid=True,
+        range=[y_floor, y_ceil],
+        tick0=y_floor,
+        dtick=y_step,
+    )
+
 
 
 def plot_daily(df: pd.DataFrame, view: str):
@@ -196,7 +216,8 @@ def plot_daily(df: pd.DataFrame, view: str):
     else:
         fig.add_trace(go.Scatter(x=df["date"], y=df["tavg"], mode="lines"))
 
-    apply_layout(fig, df["date"].min(), df["date"].max(), "°C", t=20)
+    apply_layout(fig, df["date"].min(), df["date"].max(), "°C", t=20, y_step=10)
+
     st.plotly_chart(fig, width="stretch")
 
 
@@ -235,7 +256,7 @@ def plot_precip(df: pd.DataFrame, view: str):
         )
     )
 
-    apply_layout(fig, df["date"].min(), df["date"].max(), "cm", t=10)
+    apply_layout(fig, df["date"].min(), df["date"].max(), "mm", t=10, y_step=20)
     st.plotly_chart(fig, width="stretch")
 
 
