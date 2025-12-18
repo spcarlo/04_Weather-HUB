@@ -241,7 +241,7 @@ def plot_precip(df: pd.DataFrame, view: str):
 
     if view == "Rain":
         fig.add_trace(go.Bar(x=agg["date"], y=agg["rain"], name="Rain (mm)", opacity=0.7))
-        apply_layout(fig, df["date"].min(), df["date"].max(), "mm", t=10)
+        apply_layout(fig, df["date"].min(), df["date"].max(), "mm", t=10, y_step=20)
         st.plotly_chart(fig, width="stretch")
         return
 
