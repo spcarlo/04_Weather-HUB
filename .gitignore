@@ -1,3 +1,26 @@
-/expo.ipynb
-/main.py
-/climate_app.py
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/settings.json
+
+# Dev containers
+.devcontainer/.env
+

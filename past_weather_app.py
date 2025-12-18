@@ -8,6 +8,10 @@ import plotly.graph_objects as go
 # -------------------------------
 # Page
 # -------------------------------
+st.set_page_config(
+    page_title="Past Weather",
+    layout="centered")
+
 st.title("Weather")
 st.caption("local weather analytics")
 

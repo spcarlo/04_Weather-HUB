@@ -7,11 +7,14 @@ import plotly.graph_objects as go
 # -------------------------------
 # Page
 # -------------------------------
+st.set_page_config(
+    page_title="Forecast Accuracy",
+    layout="centered")
+
 st.title("Forecast Accuracy")
 st.caption("compare previous forecasts to actuals (Open Meteo previous runs vs archive)")
 
 TIMEZONE = "Europe/Zurich"
-
 
 # -------------------------------
 # Controls
@@ -195,9 +198,40 @@ def apply_layout(fig, x_min, x_max, y_title: str, t: int) -> None:
         xaxis_title=None,
         yaxis_title=y_title,
         showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.2,
+            xanchor="center",
+            x=0.5,
+        ),
     )
-    fig.update_xaxes(showgrid=True, range=[x_min, x_max])
-    fig.update_yaxes(showgrid=True)
+
+    fig.update_xaxes(
+        showgrid=True,
+        range=[x_min, x_max],
+        tickformat="%d.%m",
+    )
+
+    # dynamic 10-degree steps
+    all_y = []
+    for trace in fig.data:
+        if hasattr(trace, "y") and trace.y is not None:
+            all_y.extend(trace.y)
+
+    y_min = min(all_y)
+    y_max = max(all_y)
+
+    y_floor = int((y_min // 10) * 10)
+    y_ceil = int(((y_max + 9) // 10) * 10)
+
+    fig.update_yaxes(
+        showgrid=True,
+        range=[y_floor, y_ceil],
+        tick0=y_floor,
+        dtick=2,
+    )
+
 
 
 def x_range(scored: pd.DataFrame, future: pd.DataFrame) -> tuple[pd.Timestamp, pd.Timestamp]:
@@ -216,21 +250,24 @@ def plot_pred_vs_actual(scored: pd.DataFrame, future: pd.DataFrame) -> None:
     fig.add_trace(
         go.Scatter(
             x=scored["date"],
+            y=scored["temp_pred"],
+            mode="lines",
+            name="old forecast",
+            line=dict(color="#F4A261", shape="spline"),
+            hovertemplate="%{y:.1f} °C<extra></extra>",
+        )
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=scored["date"],
             y=scored["temp_actual"],
             mode="lines",
             name="actual",
             line=dict(color="#4CAF50", shape="spline"),
         )
     )
-    fig.add_trace(
-        go.Scatter(
-            x=scored["date"],
-            y=scored["temp_pred"],
-            mode="lines",
-            name="forecast (past)",
-            line=dict(color="#F4A261", shape="spline"),
-        )
-    )
+
 
     if not future.empty:
         last_row = scored.iloc[-1]
@@ -255,13 +292,14 @@ def plot_pred_vs_actual(scored: pd.DataFrame, future: pd.DataFrame) -> None:
                 x=future_plot["date"],
                 y=future_plot["temp_future"],
                 mode="lines",
-                name="forecast (next 7d)",
+                name="forecast",
                 line=dict(color="#5B8DB8", shape="spline", dash="dot"),
             )
         )
 
     x_min, x_max = x_range(scored, future)
     apply_layout(fig, x_min, x_max, "°C", t=10)
+
     st.plotly_chart(fig, width="stretch")
 
 
