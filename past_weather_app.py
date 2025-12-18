@@ -268,6 +268,7 @@ def plot_precip(df: pd.DataFrame, view: str):
         )
     )
 
+
     apply_layout(fig, df["date"].min(), df["date"].max(), "cm", t=10, y_step=20)
     st.plotly_chart(fig, width="stretch")
 
