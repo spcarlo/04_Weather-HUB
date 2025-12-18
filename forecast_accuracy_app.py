@@ -152,6 +152,20 @@ def score_daily_forecast(pred_daily: pd.DataFrame, actual_daily: pd.DataFrame) -
 def compute_metrics(df: pd.DataFrame) -> dict:
     return {"mae": float(df["temp_error"].abs().mean()), "bias": float(df["temp_error"].mean())}
 
+@st.cache_data(ttl=60 * 60)
+def load_scored_max_window(lat: float, lon: float, horizon_days: int, timezone: str) -> pd.DataFrame:
+    max_days = 90
+
+    hourly_pred = fetch_previous_runs_temp(lat, lon, horizon_days, max_days, timezone)
+    pred_daily = build_daily_pred(hourly_pred)
+
+    start = pred_daily["date"].min()
+    end = pred_daily["date"].max()
+
+    actual_daily = fetch_actual_daily_mean(lat, lon, start, end, timezone)
+    scored = score_daily_forecast(pred_daily, actual_daily)
+
+    return scored.sort_values("date").reset_index(drop=True)
 
 @st.cache_data(ttl=60 * 60)
 def load_scored(lat: float, lon: float, horizon_days: int, past_days: int, timezone: str) -> pd.DataFrame:
@@ -185,7 +199,13 @@ def load_future_daily_mean(lat: float, lon: float, days: int, timezone: str) -> 
 
 
 def load_scored_for_location(loc: dict, horizon_days: int, past_days: int, timezone: str) -> pd.DataFrame:
-    return load_scored(loc["latitude"], loc["longitude"], horizon_days, past_days, timezone)
+    scored_all = load_scored_max_window(loc["latitude"], loc["longitude"], horizon_days, timezone)
+
+    end = scored_all["date"].max()
+    start = end - pd.Timedelta(days=past_days - 1)
+
+    return scored_all[scored_all["date"] >= start].reset_index(drop=True)
+
 
 
 # -------------------------------

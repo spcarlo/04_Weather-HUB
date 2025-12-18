@@ -26,7 +26,7 @@ PRECIP_VIEWS = ("Rain", "Snow")
 def render_controls():
     with st.sidebar:
         location = st.text_input("Location", value="Zürich")
-        days_back = st.slider("Days back", min_value=5, max_value=90, value=14)
+        days_back = st.slider("Days back", min_value=7, max_value=90, value=14)
     return location, days_back
 
 # -------------------------------
@@ -90,10 +90,13 @@ def snow_depth_daily_df(j: dict) -> pd.DataFrame | None:
     return out
 
 
-def fetch_daily(lat: float, lon: float, days_back: int, timezone: str) -> pd.DataFrame:
-    end = date.today()
-    start = end - timedelta(days=days_back)
-
+def fetch_daily(
+    lat: float,
+    lon: float,
+    start: date,
+    end: date,
+    timezone: str,
+) -> pd.DataFrame:
     base = {
         "latitude": lat,
         "longitude": lon,
@@ -123,6 +126,7 @@ def fetch_daily(lat: float, lon: float, days_back: int, timezone: str) -> pd.Dat
     return out
 
 
+
 @st.cache_data(ttl=24 * 60 * 60)
 def load_location(name: str):
     try:
@@ -132,8 +136,10 @@ def load_location(name: str):
 
 
 @st.cache_data(ttl=60 * 60)
-def load_daily(lat: float, lon: float, days_back: int, timezone: str):
-    return fetch_daily(lat, lon, days_back, timezone)
+def load_daily(lat: float, lon: float, timezone: str) -> pd.DataFrame:
+    end = date.today()
+    start = end - timedelta(days=90)
+    return fetch_daily(lat, lon, start, end, timezone)
 
 
 # -------------------------------
@@ -161,8 +167,14 @@ def prepare_df(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_weather_df(loc: dict, days_back: int) -> pd.DataFrame:
-    df = load_daily(loc["latitude"], loc["longitude"], days_back, TIMEZONE)
-    return prepare_df(df)
+    df_all = load_daily(loc["latitude"], loc["longitude"], TIMEZONE)
+    df_all = prepare_df(df_all)
+
+    end = pd.Timestamp(date.today())
+    start = end - pd.Timedelta(days=days_back)
+
+    return df_all[df_all["date"] >= start].reset_index(drop=True)
+
 
 
 def show_metrics(df: pd.DataFrame):
@@ -202,7 +214,7 @@ def apply_layout(fig, x_min, x_max, y_title: str, t: int, y_step: int):
         showgrid=True,
         range=[y_floor, y_ceil],
         tick0=y_floor,
-        dtick=y_step,
+        dtick=y_step / 5,
     )
 
 
