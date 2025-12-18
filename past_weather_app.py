@@ -257,18 +257,18 @@ def plot_precip(df: pd.DataFrame, view: str):
         st.plotly_chart(fig, width="stretch")
         return
 
-    fig.add_trace(go.Bar(x=agg["date"], y=agg["snowfall"], name="Snowfall (cm)", opacity=0.7))
+    fig.add_trace(go.Bar(x=agg["date"], y=agg["snowfall"], name="Snowfall", opacity=0.7))
     fig.add_trace(
         go.Scatter(
             x=agg["date"],
             y=agg["snow_depth"],
             mode="lines",
-            name="Snow depth (cm)",
+            name="Snow depth",
             line=dict(color="white", width=3, shape="spline"),
         )
     )
 
-    apply_layout(fig, df["date"].min(), df["date"].max(), "mm", t=10, y_step=20)
+    apply_layout(fig, df["date"].min(), df["date"].max(), "cm", t=10, y_step=20)
     st.plotly_chart(fig, width="stretch")
 
 
