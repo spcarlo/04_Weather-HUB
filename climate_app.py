@@ -1,7 +1,6 @@
 import requests
 import pandas as pd
 import streamlit as st
-from datetime import date
 import plotly.graph_objects as go
 
 
@@ -17,7 +16,7 @@ TIMEZONE = "Europe/Zurich"
 # -------------------------------
 # Controls
 # -------------------------------
-def render_controls():
+def render_controls() -> tuple[str, int, int]:
     with st.sidebar:
         location = st.text_input("Location", value="Zürich")
         horizon_days = st.slider("Forecast horizon (days ahead)", min_value=1, max_value=7, value=3)
@@ -28,14 +27,33 @@ def render_controls():
 # -------------------------------
 # Location helpers
 # -------------------------------
+def api_get(url: str, params: dict) -> dict:
+    r = requests.get(url, params=params, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
 def get_location(name: str) -> dict:
-    geo = requests.get(
+    j = api_get(
         "https://geocoding-api.open-meteo.com/v1/search",
-        params={"name": name, "count": 1, "language": "de", "format": "json"},
-        timeout=30,
+        {"name": name, "count": 1, "language": "de", "format": "json"},
     )
-    geo.raise_for_status()
-    return geo.json()["results"][0]
+    return j["results"][0]
+
+
+@st.cache_data(ttl=24 * 60 * 60)
+def load_location(name: str):
+    try:
+        return get_location(name)
+    except Exception:
+        return None
+
+
+def get_location_cached_by_name(name: str):
+    if st.session_state.get("location_name") != name:
+        st.session_state.location_name = name
+        st.session_state.location_data = load_location(name)
+    return st.session_state.location_data
 
 
 def format_location(loc: dict) -> str:
@@ -53,131 +71,83 @@ def map_df(loc: dict) -> pd.DataFrame:
     return pd.DataFrame({"lat": [loc["latitude"]], "lon": [loc["longitude"]]})
 
 
-@st.cache_data(ttl=24 * 60 * 60)
-def load_location(name: str):
-    try:
-        return get_location(name)
-    except Exception:
-        return None
-
-
 def render_location_header(location: str):
-    loc_ph = st.empty()
-    map_ph = st.empty()
-
-    loc = load_location(location)
+    loc = get_location_cached_by_name(location)
     if loc is None:
-        loc_ph.error("Location not found")
+        st.error("Location not found")
         return None
 
-    loc_ph.caption(format_location(loc))
-    map_ph.map(map_df(loc), zoom=9, height=180)
+    st.caption(format_location(loc))
+    st.map(map_df(loc), zoom=9, height=180)
     return loc
 
 
 # -------------------------------
 # Data helpers
 # -------------------------------
-def previous_runs_get(params: dict) -> dict:
-    r = requests.get(
-        "https://previous-runs-api.open-meteo.com/v1/forecast",
-        params=params,
-        timeout=30,
-    )
-    r.raise_for_status()
-    return r.json()
-
-
-def archive_get(params: dict) -> dict:
-    r = requests.get(
-        "https://archive-api.open-meteo.com/v1/archive",
-        params=params,
-        timeout=30,
-    )
-    r.raise_for_status()
-    return r.json()
-
-
-def hourly_to_daily_tmin_tmax(df: pd.DataFrame, value_col: str) -> pd.DataFrame:
+def hourly_to_daily_mean(df: pd.DataFrame, value_col: str) -> pd.DataFrame:
     d = df[["time", value_col]].copy()
     d["date"] = d["time"].dt.date
-    out = d.groupby("date", as_index=False).agg(
-        tmin=(value_col, "min"),
-        tmax=(value_col, "max"),
-    )
+    out = d.groupby("date", as_index=False).agg(temp_mean=(value_col, "mean"))
     out["date"] = pd.to_datetime(out["date"])
     return out
 
 
 def fetch_previous_runs_temp(lat: float, lon: float, horizon_days: int, past_days: int, timezone: str) -> pd.DataFrame:
     pred_col = f"temperature_2m_previous_day{horizon_days}"
-
-    params = {
-        "latitude": lat,
-        "longitude": lon,
-        "timezone": timezone,
-        "past_days": past_days,
-        "forecast_days": 0,
-        "hourly": pred_col,
-    }
-
-    j = previous_runs_get(params)
-    h = j["hourly"]
-
-    return pd.DataFrame(
+    j = api_get(
+        "https://previous-runs-api.open-meteo.com/v1/forecast",
         {
-            "time": pd.to_datetime(h["time"]),
-            "temp_pred": h[pred_col],
-        }
+            "latitude": lat,
+            "longitude": lon,
+            "timezone": timezone,
+            "past_days": past_days,
+            "forecast_days": 0,
+            "hourly": pred_col,
+        },
     )
+    h = j["hourly"]
+    return pd.DataFrame({"time": pd.to_datetime(h["time"]), "temp_pred": h[pred_col]})
 
 
 def build_daily_pred(hourly_pred: pd.DataFrame) -> pd.DataFrame:
-    return hourly_to_daily_tmin_tmax(hourly_pred, "temp_pred").rename(
-        columns={"tmin": "tmin_pred", "tmax": "tmax_pred"}
-    )
+    return hourly_to_daily_mean(hourly_pred, "temp_pred").rename(columns={"temp_mean": "temp_pred"})
 
 
-def fetch_actual_daily_tmin_tmax(
+def fetch_actual_daily_mean(
     lat: float,
     lon: float,
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
     timezone: str,
 ) -> pd.DataFrame:
-    params = {
-        "latitude": lat,
-        "longitude": lon,
-        "start_date": start_date.date().isoformat(),
-        "end_date": end_date.date().isoformat(),
-        "daily": "temperature_2m_max,temperature_2m_min",
-        "timezone": timezone,
-    }
-
-    j = archive_get(params)
+    j = api_get(
+        "https://archive-api.open-meteo.com/v1/archive",
+        {
+            "latitude": lat,
+            "longitude": lon,
+            "start_date": start_date.date().isoformat(),
+            "end_date": end_date.date().isoformat(),
+            "daily": "temperature_2m_mean",
+            "timezone": timezone,
+        },
+    )
     return pd.DataFrame(
         {
             "date": pd.to_datetime(j["daily"]["time"]),
-            "tmin_actual": j["daily"]["temperature_2m_min"],
-            "tmax_actual": j["daily"]["temperature_2m_max"],
+            "temp_actual": j["daily"]["temperature_2m_mean"],
         }
     )
 
 
 def score_daily_forecast(pred_daily: pd.DataFrame, actual_daily: pd.DataFrame) -> pd.DataFrame:
     df = pred_daily.merge(actual_daily, on="date", how="inner")
-    df["tmin_error"] = df["tmin_pred"] - df["tmin_actual"]
-    df["tmax_error"] = df["tmax_pred"] - df["tmax_actual"]
+    df["temp_error"] = df["temp_pred"] - df["temp_actual"]
     return df
 
 
 def compute_metrics(df: pd.DataFrame) -> dict:
-    return {
-        "tmin_mae": float(df["tmin_error"].abs().mean()),
-        "tmax_mae": float(df["tmax_error"].abs().mean()),
-        "tmin_bias": float(df["tmin_error"].mean()),
-        "tmax_bias": float(df["tmax_error"].mean()),
-    }
+    return {"mae": float(df["temp_error"].abs().mean()), "bias": float(df["temp_error"].mean())}
 
 
 @st.cache_data(ttl=60 * 60)
@@ -188,16 +158,37 @@ def load_scored(lat: float, lon: float, horizon_days: int, past_days: int, timez
     start = pred_daily["date"].min()
     end = pred_daily["date"].max()
 
-    actual_daily = fetch_actual_daily_tmin_tmax(lat, lon, start, end, timezone)
+    actual_daily = fetch_actual_daily_mean(lat, lon, start, end, timezone)
     scored = score_daily_forecast(pred_daily, actual_daily)
-
     return scored.sort_values("date").reset_index(drop=True)
+
+
+@st.cache_data(ttl=60 * 60)
+def load_future_daily_mean(lat: float, lon: float, days: int, timezone: str) -> pd.DataFrame:
+    j = api_get(
+        "https://api.open-meteo.com/v1/forecast",
+        {
+            "latitude": lat,
+            "longitude": lon,
+            "daily": "temperature_2m_mean",
+            "forecast_days": days,
+            "timezone": timezone,
+        },
+    )
+    d = j.get("daily", {})
+    if not d:
+        return pd.DataFrame(columns=["date", "temp_future"])
+    return pd.DataFrame({"date": pd.to_datetime(d["time"]), "temp_future": d["temperature_2m_mean"]})
+
+
+def load_scored_for_location(loc: dict, horizon_days: int, past_days: int, timezone: str) -> pd.DataFrame:
+    return load_scored(loc["latitude"], loc["longitude"], horizon_days, past_days, timezone)
 
 
 # -------------------------------
 # Plots
 # -------------------------------
-def apply_layout(fig, x_min, x_max, y_title: str, t: int):
+def apply_layout(fig, x_min, x_max, y_title: str, t: int) -> None:
     fig.update_layout(
         margin=dict(l=10, r=10, t=t, b=10),
         hovermode="x unified",
@@ -209,46 +200,106 @@ def apply_layout(fig, x_min, x_max, y_title: str, t: int):
     fig.update_yaxes(showgrid=True)
 
 
-def plot_errors(scored: pd.DataFrame, which: str):
-    fig = go.Figure()
-    if which == "Tmin error":
-        fig.add_trace(go.Scatter(x=scored["date"], y=scored["tmin_error"], mode="lines+markers", name="tmin_error"))
-        apply_layout(fig, scored["date"].min(), scored["date"].max(), "°C", t=10)
-    else:
-        fig.add_trace(go.Scatter(x=scored["date"], y=scored["tmax_error"], mode="lines+markers", name="tmax_error"))
-        apply_layout(fig, scored["date"].min(), scored["date"].max(), "°C", t=10)
+def x_range(scored: pd.DataFrame, future: pd.DataFrame) -> tuple[pd.Timestamp, pd.Timestamp]:
+    x_min = scored["date"].min()
+    x_max = scored["date"].max()
+    if not future.empty:
+        x_min = min(x_min, future["date"].min())
+        x_max = max(x_max, future["date"].max())
+    return x_min, x_max
 
+
+def plot_pred_vs_actual(scored: pd.DataFrame, future: pd.DataFrame) -> None:
+
+    fig = go.Figure()
+
+    fig.add_trace(
+        go.Scatter(
+            x=scored["date"],
+            y=scored["temp_actual"],
+            mode="lines",
+            name="actual",
+            line=dict(color="#4CAF50", shape="spline"),
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=scored["date"],
+            y=scored["temp_pred"],
+            mode="lines",
+            name="forecast (past)",
+            line=dict(color="#F4A261", shape="spline"),
+        )
+    )
+
+    if not future.empty:
+        last_row = scored.iloc[-1]
+
+        future_plot = pd.concat(
+            [
+                pd.DataFrame(
+                    {
+                        "date": [last_row["date"]],
+                        "temp_future": [last_row["temp_actual"]],
+                    }
+                ),
+                future,
+            ],
+            ignore_index=True,
+        )
+        
+        future_plot = future_plot.drop_duplicates(subset=["date"], keep="first")
+
+        fig.add_trace(
+            go.Scatter(
+                x=future_plot["date"],
+                y=future_plot["temp_future"],
+                mode="lines",
+                name="forecast (next 7d)",
+                line=dict(color="#5B8DB8", shape="spline", dash="dot"),
+            )
+        )
+
+    x_min, x_max = x_range(scored, future)
+    apply_layout(fig, x_min, x_max, "°C", t=10)
     st.plotly_chart(fig, width="stretch")
+
+
+# -------------------------------
+# UI
+# -------------------------------
+def render_metrics(scored: pd.DataFrame) -> None:
+    m = compute_metrics(scored)
+    c1, c2 = st.columns(2)
+    c1.metric("Temp MAE (°C)", f"{m['mae']:.2f}")
+    c2.metric("Temp bias (°C)", f"{m['bias']:.2f}")
+
+
+def render_data(scored: pd.DataFrame) -> None:
+    with st.expander("Data"):
+        st.dataframe(scored, width="stretch", hide_index=True)
 
 
 # -------------------------------
 # Run
 # -------------------------------
-def main():
+def main() -> None:
     location, horizon_days, past_days = render_controls()
 
     loc = render_location_header(location)
     if loc is None:
         return
 
-    scored = load_scored(loc["latitude"], loc["longitude"], horizon_days, past_days, TIMEZONE)
+    scored = load_scored_for_location(loc, horizon_days, past_days, TIMEZONE)
     if scored.empty:
         st.warning("No data returned for this selection.")
         return
 
-    m = compute_metrics(scored)
+    future = load_future_daily_mean(loc["latitude"], loc["longitude"], days=7, timezone=TIMEZONE)
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Tmin MAE (°C)", f"{m['tmin_mae']:.2f}")
-    c2.metric("Tmax MAE (°C)", f"{m['tmax_mae']:.2f}")
-    c3.metric("Tmin bias (°C)", f"{m['tmin_bias']:.2f}")
-    c4.metric("Tmax bias (°C)", f"{m['tmax_bias']:.2f}")
-
-    view = st.radio("View", ["Tmin error", "Tmax error"], horizontal=True, label_visibility="collapsed")
-    plot_errors(scored, view)
-
-    with st.expander("Data"):
-        st.dataframe(scored, width="stretch", hide_index=True)
+    render_metrics(scored)
+    plot_pred_vs_actual(scored, future=future)
+    render_data(scored)
 
 
 if __name__ == "__main__":
