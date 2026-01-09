@@ -7,6 +7,11 @@ A simple Streamlit app to explore weather data and forecast accuracy.
 - `forecast_accuracy_app.py` evaluates forecast accuracy
 - `requirements.txt` lists dependencies
 
+
+## Open in web
+https://past-weather.streamlit.app/
+https://forecast-accuracy.streamlit.app/
+
 ## Run locally
 ```bash
 pip install -r requirements.txt
