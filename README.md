@@ -9,8 +9,8 @@ A simple Streamlit app to explore weather data and forecast accuracy.
 
 
 ## Open in web
-https://past-weather.streamlit.app/
-https://forecast-accuracy.streamlit.app/
+- https://past-weather.streamlit.app/
+- https://forecast-accuracy.streamlit.app/
 
 ## Run locally
 ```bash
