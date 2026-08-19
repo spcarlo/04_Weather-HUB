@@ -3,6 +3,16 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Test and cache outputs
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+
 # Virtual environments
 .venv/
 venv/
@@ -20,6 +30,7 @@ Thumbs.db
 
 # Editors
 .vscode/settings.json
+.cursor/
 
 # Dev containers
 .devcontainer/.env
