@@ -1,7 +1,19 @@
+import time
+
 import requests
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
+
+from forecast_accuracy_calculations import (
+    actual_daily_temperature_fields,
+    actual_daily_temperature_frame,
+    build_daily_pred,
+    compute_metrics,
+    previous_run_hourly_temperature_frame,
+    previous_run_temperature_column,
+    score_daily_forecast,
+)
 
 
 # -------------------------------
@@ -15,25 +27,52 @@ st.title("Forecast Accuracy")
 st.caption("compare previous forecasts to actuals (Open Meteo previous runs vs archive)")
 
 TIMEZONE = "Europe/Zurich"
+API_RETRIES = 3
+API_RETRY_DELAY_SECONDS = 1
+HORIZON_DAYS = range(1, 8)
+TEMP_VIEWS = {
+    "Mean": "mean",
+    "Min": "min",
+    "Max": "max",
+}
 
 # -------------------------------
 # Controls
 # -------------------------------
-def render_controls() -> tuple[str, int, int]:
+def render_controls() -> tuple[str, int, int, str]:
     with st.sidebar:
         location = st.text_input("Location", value="Zürich")
-        horizon_days = st.slider("Forecast horizon (days ahead)", min_value=1, max_value=7, value=3)
+        horizon_days = st.slider(
+            "Forecast horizon (days ahead)",
+            min_value=min(HORIZON_DAYS),
+            max_value=max(HORIZON_DAYS),
+            value=3,
+        )
         past_days = st.slider("Verify past days", min_value=7, max_value=90, value=30)
-    return location, horizon_days, past_days
+        temp_view = st.selectbox("Temperature view", options=list(TEMP_VIEWS))
+    return location, horizon_days, past_days, TEMP_VIEWS[temp_view]
 
 
 # -------------------------------
 # Location helpers
 # -------------------------------
 def api_get(url: str, params: dict) -> dict:
-    r = requests.get(url, params=params, timeout=30)
-    r.raise_for_status()
-    return r.json()
+    last_error = None
+
+    for attempt in range(API_RETRIES):
+        try:
+            r = requests.get(url, params=params, timeout=30)
+            r.raise_for_status()
+            return r.json()
+        except requests.RequestException as e:
+            last_error = e
+            if attempt < API_RETRIES - 1:
+                time.sleep(API_RETRY_DELAY_SECONDS * (attempt + 1))
+
+    if last_error is not None:
+        raise last_error
+
+    raise RuntimeError("API request failed")
 
 
 def get_location(name: str) -> dict:
@@ -85,19 +124,8 @@ def render_location_header(location: str):
     return loc
 
 
-# -------------------------------
-# Data helpers
-# -------------------------------
-def hourly_to_daily_mean(df: pd.DataFrame, value_col: str) -> pd.DataFrame:
-    d = df[["time", value_col]].copy()
-    d["date"] = d["time"].dt.date
-    out = d.groupby("date", as_index=False).agg(temp_mean=(value_col, "mean"))
-    out["date"] = pd.to_datetime(out["date"])
-    return out
-
-
-def fetch_previous_runs_temp(lat: float, lon: float, horizon_days: int, past_days: int, timezone: str) -> pd.DataFrame:
-    pred_col = f"temperature_2m_previous_day{horizon_days}"
+def fetch_previous_runs_temp(lat: float, lon: float, past_days: int, timezone: str) -> dict:
+    pred_cols = [previous_run_temperature_column(horizon_days) for horizon_days in HORIZON_DAYS]
     j = api_get(
         "https://previous-runs-api.open-meteo.com/v1/forecast",
         {
@@ -106,18 +134,25 @@ def fetch_previous_runs_temp(lat: float, lon: float, horizon_days: int, past_day
             "timezone": timezone,
             "past_days": past_days,
             "forecast_days": 0,
-            "hourly": pred_col,
+            "hourly": ",".join(pred_cols),
         },
     )
-    h = j["hourly"]
-    return pd.DataFrame({"time": pd.to_datetime(h["time"]), "temp_pred": h[pred_col]})
+    return j["hourly"]
 
 
-def build_daily_pred(hourly_pred: pd.DataFrame) -> pd.DataFrame:
-    return hourly_to_daily_mean(hourly_pred, "temp_pred").rename(columns={"temp_mean": "temp_pred"})
+def build_daily_pred_for_all_horizons(hourly_data: dict) -> pd.DataFrame:
+    daily_frames = []
+
+    for horizon_days in HORIZON_DAYS:
+        hourly_pred = previous_run_hourly_temperature_frame(hourly_data, horizon_days)
+        pred_daily = build_daily_pred(hourly_pred)
+        pred_daily["horizon_days"] = horizon_days
+        daily_frames.append(pred_daily)
+
+    return pd.concat(daily_frames, ignore_index=True)
 
 
-def fetch_actual_daily_mean(
+def fetch_actual_daily_temp(
     lat: float,
     lon: float,
     start_date: pd.Timestamp,
@@ -131,80 +166,65 @@ def fetch_actual_daily_mean(
             "longitude": lon,
             "start_date": start_date.date().isoformat(),
             "end_date": end_date.date().isoformat(),
-            "daily": "temperature_2m_mean",
+            "daily": actual_daily_temperature_fields(),
             "timezone": timezone,
         },
     )
-    return pd.DataFrame(
-        {
-            "date": pd.to_datetime(j["daily"]["time"]),
-            "temp_actual": j["daily"]["temperature_2m_mean"],
-        }
-    )
-
-
-def score_daily_forecast(pred_daily: pd.DataFrame, actual_daily: pd.DataFrame) -> pd.DataFrame:
-    df = pred_daily.merge(actual_daily, on="date", how="inner")
-    df["temp_error"] = df["temp_pred"] - df["temp_actual"]
-    return df
-
-
-def compute_metrics(df: pd.DataFrame) -> dict:
-    return {"mae": float(df["temp_error"].abs().mean()), "bias": float(df["temp_error"].mean())}
+    return actual_daily_temperature_frame(j["daily"])
 
 @st.cache_data(ttl=60 * 60)
-def load_scored_max_window(lat: float, lon: float, horizon_days: int, timezone: str) -> pd.DataFrame:
+def load_scored_max_window(lat: float, lon: float, timezone: str) -> pd.DataFrame:
     max_days = 90
 
-    hourly_pred = fetch_previous_runs_temp(lat, lon, horizon_days, max_days, timezone)
-    pred_daily = build_daily_pred(hourly_pred)
+    hourly_data = fetch_previous_runs_temp(lat, lon, max_days, timezone)
+    pred_daily = build_daily_pred_for_all_horizons(hourly_data)
 
     start = pred_daily["date"].min()
     end = pred_daily["date"].max()
 
-    actual_daily = fetch_actual_daily_mean(lat, lon, start, end, timezone)
+    actual_daily = fetch_actual_daily_temp(lat, lon, start, end, timezone)
     scored = score_daily_forecast(pred_daily, actual_daily)
 
     return scored.sort_values("date").reset_index(drop=True)
 
 @st.cache_data(ttl=60 * 60)
-def load_scored(lat: float, lon: float, horizon_days: int, past_days: int, timezone: str) -> pd.DataFrame:
-    hourly_pred = fetch_previous_runs_temp(lat, lon, horizon_days, past_days, timezone)
-    pred_daily = build_daily_pred(hourly_pred)
-
-    start = pred_daily["date"].min()
-    end = pred_daily["date"].max()
-
-    actual_daily = fetch_actual_daily_mean(lat, lon, start, end, timezone)
-    scored = score_daily_forecast(pred_daily, actual_daily)
-    return scored.sort_values("date").reset_index(drop=True)
-
-
-@st.cache_data(ttl=60 * 60)
-def load_future_daily_mean(lat: float, lon: float, days: int, timezone: str) -> pd.DataFrame:
+def load_future_daily_temp(lat: float, lon: float, days: int, timezone: str) -> pd.DataFrame:
     j = api_get(
         "https://api.open-meteo.com/v1/forecast",
         {
             "latitude": lat,
             "longitude": lon,
-            "daily": "temperature_2m_mean",
+            "daily": actual_daily_temperature_fields(),
             "forecast_days": days,
             "timezone": timezone,
         },
     )
     d = j.get("daily", {})
     if not d:
-        return pd.DataFrame(columns=["date", "temp_future"])
-    return pd.DataFrame({"date": pd.to_datetime(d["time"]), "temp_future": d["temperature_2m_mean"]})
+        return empty_future_daily_temp()
+
+    return pd.DataFrame(
+        {
+            "date": pd.to_datetime(d["time"]),
+            "temp_future_mean": d["temperature_2m_mean"],
+            "temp_future_min": d["temperature_2m_min"],
+            "temp_future_max": d["temperature_2m_max"],
+        }
+    )
+
+
+def empty_future_daily_temp() -> pd.DataFrame:
+    return pd.DataFrame(columns=["date", "temp_future_mean", "temp_future_min", "temp_future_max"])
 
 
 def load_scored_for_location(loc: dict, horizon_days: int, past_days: int, timezone: str) -> pd.DataFrame:
-    scored_all = load_scored_max_window(loc["latitude"], loc["longitude"], horizon_days, timezone)
+    scored_all = load_scored_max_window(loc["latitude"], loc["longitude"], timezone)
+    scored_horizon = scored_all[scored_all["horizon_days"] == horizon_days]
 
-    end = scored_all["date"].max()
+    end = scored_horizon["date"].max()
     start = end - pd.Timedelta(days=past_days - 1)
 
-    return scored_all[scored_all["date"] >= start].reset_index(drop=True)
+    return scored_horizon[scored_horizon["date"] >= start].reset_index(drop=True)
 
 
 
@@ -239,8 +259,12 @@ def apply_layout(fig, x_min, x_max, y_title: str, t: int) -> None:
         if hasattr(trace, "y") and trace.y is not None:
             all_y.extend(trace.y)
 
-    y_min = min(all_y)
-    y_max = max(all_y)
+    y_values = pd.to_numeric(pd.Series(all_y), errors="coerce").dropna()
+    if y_values.empty:
+        return
+
+    y_min = y_values.min()
+    y_max = y_values.max()
 
     y_floor = int((y_min // 10) * 10)
     y_ceil = int(((y_max + 9) // 10) * 10)
@@ -263,14 +287,17 @@ def x_range(scored: pd.DataFrame, future: pd.DataFrame) -> tuple[pd.Timestamp, p
     return x_min, x_max
 
 
-def plot_pred_vs_actual(scored: pd.DataFrame, future: pd.DataFrame) -> None:
+def plot_pred_vs_actual(scored: pd.DataFrame, future: pd.DataFrame, temp_metric: str) -> None:
+    pred_col = f"temp_pred_{temp_metric}"
+    actual_col = f"temp_actual_{temp_metric}"
+    future_col = f"temp_future_{temp_metric}"
 
     fig = go.Figure()
 
     fig.add_trace(
         go.Scatter(
             x=scored["date"],
-            y=scored["temp_pred"],
+            y=scored[pred_col],
             mode="lines",
             name="old forecast",
             line=dict(color="#F4A261", shape="spline"),
@@ -281,7 +308,7 @@ def plot_pred_vs_actual(scored: pd.DataFrame, future: pd.DataFrame) -> None:
     fig.add_trace(
         go.Scatter(
             x=scored["date"],
-            y=scored["temp_actual"],
+            y=scored[actual_col],
             mode="lines",
             name="actual",
             line=dict(color="#4CAF50", shape="spline"),
@@ -297,7 +324,7 @@ def plot_pred_vs_actual(scored: pd.DataFrame, future: pd.DataFrame) -> None:
                 pd.DataFrame(
                     {
                         "date": [last_row["date"]],
-                        "temp_future": [last_row["temp_actual"]],
+                        future_col: [last_row[actual_col]],
                     }
                 ),
                 future,
@@ -310,7 +337,7 @@ def plot_pred_vs_actual(scored: pd.DataFrame, future: pd.DataFrame) -> None:
         fig.add_trace(
             go.Scatter(
                 x=future_plot["date"],
-                y=future_plot["temp_future"],
+                y=future_plot[future_col],
                 mode="lines",
                 name="forecast",
                 line=dict(color="#5B8DB8", shape="spline", dash="dot"),
@@ -326,37 +353,76 @@ def plot_pred_vs_actual(scored: pd.DataFrame, future: pd.DataFrame) -> None:
 # -------------------------------
 # UI
 # -------------------------------
+def format_metric_value(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+
+    return f"{value:.2f}"
+
+
 def render_metrics(scored: pd.DataFrame) -> None:
     m = compute_metrics(scored)
-    c1, c2 = st.columns(2)
-    c1.metric("Temp MAE (°C)", f"{m['mae']:.2f}")
-    c2.metric("Temp bias (°C)", f"{m['bias']:.2f}")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Mean MAE (°C)", format_metric_value(m["mean_mae"]))
+    c2.metric("Min MAE (°C)", format_metric_value(m["min_mae"]))
+    c3.metric("Max MAE (°C)", format_metric_value(m["max_mae"]))
 
 
 def render_data(scored: pd.DataFrame) -> None:
     with st.expander("Data"):
-        st.dataframe(scored, width="stretch", hide_index=True)
+        visible_cols = [
+            "date",
+            "temp_pred_mean",
+            "temp_actual_mean",
+            "temp_error_mean",
+            "temp_pred_min",
+            "temp_actual_min",
+            "temp_error_min",
+            "temp_pred_max",
+            "temp_actual_max",
+            "temp_error_max",
+        ]
+        st.dataframe(scored[visible_cols], width="stretch", hide_index=True)
 
 
 # -------------------------------
 # Run
 # -------------------------------
 def main() -> None:
-    location, horizon_days, past_days = render_controls()
+    location, horizon_days, past_days, temp_metric = render_controls()
 
     loc = render_location_header(location)
     if loc is None:
         return
 
-    scored = load_scored_for_location(loc, horizon_days, past_days, TIMEZONE)
-    if scored.empty:
-        st.warning("No data returned for this selection.")
-        return
+    with st.status("Loading forecast data...", expanded=False) as status:
+        status.write("Fetching all forecast horizons once, then filtering locally.")
 
-    future = load_future_daily_mean(loc["latitude"], loc["longitude"], days=7, timezone=TIMEZONE)
+        try:
+            scored = load_scored_for_location(loc, horizon_days, past_days, TIMEZONE)
+        except requests.RequestException as e:
+            status.update(label="Forecast accuracy data unavailable", state="error")
+            st.error("Could not load forecast accuracy data. Please try again in a moment.")
+            st.caption(str(e))
+            return
+
+        if scored.empty:
+            status.update(label="No forecast accuracy data returned", state="error")
+            st.warning("No data returned for this selection.")
+            return
+
+        status.write("Loading the current forecast line for the selected temperature view.")
+
+        try:
+            future = load_future_daily_temp(loc["latitude"], loc["longitude"], days=7, timezone=TIMEZONE)
+        except requests.RequestException:
+            st.warning("Future forecast is temporarily unavailable.")
+            future = empty_future_daily_temp()
+
+        status.update(label="Forecast data ready", state="complete")
 
     render_metrics(scored)
-    plot_pred_vs_actual(scored, future=future)
+    plot_pred_vs_actual(scored, future=future, temp_metric=temp_metric)
     render_data(scored)
 
 
