@@ -20,9 +20,7 @@ from forecast_accuracy_calculations import (
 # -------------------------------
 # Page
 # -------------------------------
-st.set_page_config(
-    page_title="Forecast Accuracy",
-    layout="centered")
+st.set_page_config(page_title="Forecast Accuracy", layout="centered")
 
 st.title("Forecast Accuracy")
 st.caption("Compare past forecasts with measured weather")
@@ -31,6 +29,7 @@ TIMEZONE = "Europe/Zurich"
 API_RETRIES = 3
 API_RETRY_DELAY_SECONDS = 1
 HORIZON_DAYS = range(1, 8)
+MAX_PAST_DAYS = 90
 PLOT_VIEWS = {
     "Min/max": "range",
     "Mean": "mean",
@@ -48,17 +47,18 @@ def render_controls() -> tuple[str, int, int, str]:
             max_value=max(HORIZON_DAYS),
             value=3,
         )
-        past_days = st.slider("Verify past days", min_value=7, max_value=90, value=30)
+        past_days = st.slider("Verify past days", min_value=7, max_value=MAX_PAST_DAYS, value=30)
         plot_view = st.selectbox("Plot view", options=list(PLOT_VIEWS))
     return location, horizon_days, past_days, PLOT_VIEWS[plot_view]
 
 
 # -------------------------------
-# Location helpers
+# Data helpers
 # -------------------------------
 def api_get(url: str, params: dict) -> dict:
     last_error = None
 
+    # Open-Meteo can be briefly unavailable, so retry a few times
     for attempt in range(API_RETRIES):
         try:
             r = requests.get(url, params=params, timeout=30)
@@ -91,13 +91,6 @@ def load_location(name: str):
         return None
 
 
-def get_location_cached_by_name(name: str):
-    if st.session_state.get("location_name") != name:
-        st.session_state.location_name = name
-        st.session_state.location_data = load_location(name)
-    return st.session_state.location_data
-
-
 def format_location(loc: dict) -> str:
     parts = [loc.get("name"), loc.get("admin1"), loc.get("country")]
     label = ", ".join(p for p in parts if p)
@@ -114,7 +107,7 @@ def map_df(loc: dict) -> pd.DataFrame:
 
 
 def render_location_header(location: str):
-    loc = get_location_cached_by_name(location)
+    loc = load_location(location)
     if loc is None:
         st.error("Location not found")
         return None
@@ -172,11 +165,15 @@ def fetch_actual_daily_temp(
     )
     return actual_daily_temperature_frame(j["daily"])
 
+
+def empty_future_daily_temp() -> pd.DataFrame:
+    return pd.DataFrame(columns=["date", "temp_future_mean", "temp_future_min", "temp_future_max"])
+
+
 @st.cache_data(ttl=60 * 60)
 def load_scored_max_window(lat: float, lon: float, timezone: str) -> pd.DataFrame:
-    max_days = 90
-
-    hourly_data = fetch_previous_runs_temp(lat, lon, max_days, timezone)
+    # Fetch the full window once, then filter horizon and days locally
+    hourly_data = fetch_previous_runs_temp(lat, lon, MAX_PAST_DAYS, timezone)
     pred_daily = build_daily_pred_for_all_horizons(hourly_data)
 
     start = pred_daily["date"].min()
@@ -186,6 +183,7 @@ def load_scored_max_window(lat: float, lon: float, timezone: str) -> pd.DataFram
     scored = score_daily_forecast(pred_daily, actual_daily)
 
     return scored.sort_values("date").reset_index(drop=True)
+
 
 @st.cache_data(ttl=60 * 60)
 def load_future_daily_temp(lat: float, lon: float, days: int, timezone: str) -> pd.DataFrame:
@@ -213,10 +211,6 @@ def load_future_daily_temp(lat: float, lon: float, days: int, timezone: str) -> 
     )
 
 
-def empty_future_daily_temp() -> pd.DataFrame:
-    return pd.DataFrame(columns=["date", "temp_future_mean", "temp_future_min", "temp_future_max"])
-
-
 def forecast_data_key(loc: dict, horizon_days: int, past_days: int, timezone: str) -> tuple:
     return (loc["latitude"], loc["longitude"], horizon_days, past_days, timezone)
 
@@ -226,18 +220,17 @@ def load_scored_for_location(loc: dict, horizon_days: int, past_days: int, timez
     scored_horizon = scored_all[scored_all["horizon_days"] == horizon_days]
 
     end = scored_horizon["date"].max()
-    start = end - pd.Timedelta(days=past_days - 1)
+    start = end - pd.Timedelta(days=past_days - 1)  # inclusive window
 
     return scored_horizon[scored_horizon["date"] >= start].reset_index(drop=True)
-
 
 
 # -------------------------------
 # Plots
 # -------------------------------
-def apply_layout(fig, x_min, x_max, y_title: str, t: int, y_values_source=None) -> None:
+def apply_layout(fig, x_min, x_max, y_title: str, top_margin: int, y_values_source=None) -> None:
     fig.update_layout(
-        margin=dict(l=10, r=10, t=t, b=10),
+        margin=dict(l=10, r=10, t=top_margin, b=10),
         hovermode="x unified",
         xaxis_title=None,
         yaxis_title=y_title,
@@ -258,7 +251,7 @@ def apply_layout(fig, x_min, x_max, y_title: str, t: int, y_values_source=None) 
         tickformat="%d.%m",
     )
 
-    # dynamic 5-degree steps
+    # Snap ticks to 5 °C. Min/max values keep mean and range views on the same scale.
     if y_values_source is None:
         all_y = []
         for trace in fig.data:
@@ -290,7 +283,6 @@ def apply_layout(fig, x_min, x_max, y_title: str, t: int, y_values_source=None) 
     )
 
 
-
 def x_range(scored: pd.DataFrame, future: pd.DataFrame) -> tuple[pd.Timestamp, pd.Timestamp]:
     x_min = scored["date"].min()
     x_max = scored["date"].max()
@@ -311,6 +303,21 @@ def temperature_axis_values(scored: pd.DataFrame, future: pd.DataFrame) -> list:
             values.extend(future[col])
 
     return values
+
+
+def connect_future_to_last_actual(scored: pd.DataFrame, future: pd.DataFrame) -> pd.DataFrame:
+    # Start the future line on the last measured day so the plot connects
+    last_row = scored.iloc[-1]
+    bridge = pd.DataFrame(
+        {
+            "date": [last_row["date"]],
+            "temp_future_mean": [last_row["temp_actual_mean"]],
+            "temp_future_min": [last_row["temp_actual_min"]],
+            "temp_future_max": [last_row["temp_actual_max"]],
+        }
+    )
+    connected = pd.concat([bridge, future], ignore_index=True)
+    return connected.drop_duplicates(subset=["date"], keep="first")
 
 
 def add_temperature_range_lines(
@@ -383,25 +390,11 @@ def plot_mean_forecast(scored: pd.DataFrame, future: pd.DataFrame) -> None:
     add_temperature_line(fig, scored, "temp_actual_mean", "measured mean", "#4CAF50")
 
     if not future.empty:
-        last_row = scored.iloc[-1]
-        future_plot = pd.concat(
-            [
-                pd.DataFrame(
-                    {
-                        "date": [last_row["date"]],
-                        "temp_future_mean": [last_row["temp_actual_mean"]],
-                    }
-                ),
-                future,
-            ],
-            ignore_index=True,
-        )
-        future_plot = future_plot.drop_duplicates(subset=["date"], keep="first")
-
+        future_plot = connect_future_to_last_actual(scored, future)
         add_temperature_line(fig, future_plot, "temp_future_mean", "forecast mean", "#5B8DB8", dash="dot")
 
     x_min, x_max = x_range(scored, future)
-    apply_layout(fig, x_min, x_max, "°C", t=10, y_values_source=temperature_axis_values(scored, future))
+    apply_layout(fig, x_min, x_max, "°C", top_margin=10, y_values_source=temperature_axis_values(scored, future))
 
     st.plotly_chart(fig, width="stretch")
 
@@ -427,25 +420,7 @@ def plot_min_max_forecast(scored: pd.DataFrame, future: pd.DataFrame) -> None:
     )
 
     if not future.empty:
-        last_row = scored.iloc[-1]
-
-        future_plot = pd.concat(
-            [
-                pd.DataFrame(
-                    {
-                        "date": [last_row["date"]],
-                        "temp_future_mean": [last_row["temp_actual_mean"]],
-                        "temp_future_min": [last_row["temp_actual_min"]],
-                        "temp_future_max": [last_row["temp_actual_max"]],
-                    }
-                ),
-                future,
-            ],
-            ignore_index=True,
-        )
-        
-        future_plot = future_plot.drop_duplicates(subset=["date"], keep="first")
-
+        future_plot = connect_future_to_last_actual(scored, future)
         add_temperature_range_lines(
             fig,
             future_plot,
@@ -457,7 +432,7 @@ def plot_min_max_forecast(scored: pd.DataFrame, future: pd.DataFrame) -> None:
         )
 
     x_min, x_max = x_range(scored, future)
-    apply_layout(fig, x_min, x_max, "°C", t=10, y_values_source=temperature_axis_values(scored, future))
+    apply_layout(fig, x_min, x_max, "°C", top_margin=10, y_values_source=temperature_axis_values(scored, future))
 
     st.plotly_chart(fig, width="stretch")
 
@@ -506,6 +481,7 @@ def render_data(scored: pd.DataFrame) -> None:
 
 
 def get_cached_forecast_data(data_key: tuple):
+    # Skip the loading UI when only the plot view changes
     cached = st.session_state.get("forecast_accuracy_data")
     if cached is None or cached.get("key") != data_key:
         return None

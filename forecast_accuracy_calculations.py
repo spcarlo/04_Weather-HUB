@@ -16,6 +16,7 @@ ACTUAL_DAILY_TEMPERATURE_FIELDS = (
 # Forecast helpers
 # -------------------------------
 def previous_run_temperature_column(horizon_days: int) -> str:
+    # Open-Meteo name for the forecast issued N days before the target hour
     if horizon_days < 1 or horizon_days > 7:
         raise ValueError("horizon_days must be between 1 and 7")
 
@@ -37,6 +38,7 @@ def hourly_to_daily_temperature_stats(
     value_col: str,
     output_prefix: str,
 ) -> pd.DataFrame:
+    # One mean/min/max row per calendar day
     output_cols = [
         "date",
         f"{output_prefix}_mean",
@@ -65,9 +67,7 @@ def hourly_to_daily_temperature_stats(
 
 
 def build_daily_pred(hourly_pred: pd.DataFrame) -> pd.DataFrame:
-    pred_daily = hourly_to_daily_temperature_stats(hourly_pred, "temp_pred", "temp_pred")
-    pred_daily["temp_pred"] = pred_daily["temp_pred_mean"]
-    return pred_daily
+    return hourly_to_daily_temperature_stats(hourly_pred, "temp_pred", "temp_pred")
 
 
 # -------------------------------
@@ -94,12 +94,10 @@ def actual_daily_temperature_frame(daily_data: dict) -> pd.DataFrame:
 def score_daily_forecast(pred_daily: pd.DataFrame, actual_daily: pd.DataFrame) -> pd.DataFrame:
     df = pred_daily.merge(actual_daily, on="date", how="inner")
 
+    # Positive error means the forecast was too warm
     for metric in TEMPERATURE_METRICS:
         df[f"temp_error_{metric}"] = df[f"temp_pred_{metric}"] - df[f"temp_actual_{metric}"]
 
-    df["temp_pred"] = df["temp_pred_mean"]
-    df["temp_actual"] = df["temp_actual_mean"]
-    df["temp_error"] = df["temp_error_mean"]
     return df
 
 
@@ -116,21 +114,10 @@ def _mae_or_none(series: pd.Series) -> float | None:
 
 
 def compute_metrics(df: pd.DataFrame) -> dict:
-    mean_error = _mean_or_none(df["temp_error_mean"])
-    min_error = _mean_or_none(df["temp_error_min"])
-    max_error = _mean_or_none(df["temp_error_max"])
-
-    mean_mae = _mae_or_none(df["temp_error_mean"])
-    min_mae = _mae_or_none(df["temp_error_min"])
-    max_mae = _mae_or_none(df["temp_error_max"])
-
-    return {
-        "mae": mean_mae,
-        "bias": mean_error,
-        "mean_mae": mean_mae,
-        "mean_bias": mean_error,
-        "min_mae": min_mae,
-        "min_bias": min_error,
-        "max_mae": max_mae,
-        "max_bias": max_error,
-    }
+    # MAE = typical size of the miss; bias = average signed error
+    metrics = {}
+    for metric in TEMPERATURE_METRICS:
+        error = df[f"temp_error_{metric}"]
+        metrics[f"{metric}_mae"] = _mae_or_none(error)
+        metrics[f"{metric}_bias"] = _mean_or_none(error)
+    return metrics

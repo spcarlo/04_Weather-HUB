@@ -1,21 +1,21 @@
-import requests
-import pandas as pd
-import streamlit as st
 from datetime import date, timedelta
+
+import pandas as pd
 import plotly.graph_objects as go
+import requests
+import streamlit as st
 
 
 # -------------------------------
 # Page
 # -------------------------------
-st.set_page_config(
-    page_title="Past Weather",
-    layout="centered")
+st.set_page_config(page_title="Past Weather", layout="centered")
 
 st.title("Weather")
 st.caption("local weather analytics")
 
 TIMEZONE = "Europe/Zurich"
+MAX_PAST_DAYS = 90
 TEMP_VIEWS = ("Min / Max", "Average")
 PRECIP_VIEWS = ("Rain", "Snow")
 
@@ -26,8 +26,9 @@ PRECIP_VIEWS = ("Rain", "Snow")
 def render_controls():
     with st.sidebar:
         location = st.text_input("Location", value="Zürich")
-        days_back = st.slider("Days back", min_value=7, max_value=90, value=14)
+        days_back = st.slider("Days back", min_value=7, max_value=MAX_PAST_DAYS, value=14)
     return location, days_back
+
 
 # -------------------------------
 # Data helpers
@@ -41,6 +42,7 @@ def get_location(name: str) -> dict:
     geo.raise_for_status()
     return geo.json()["results"][0]
 
+
 def format_location(loc: dict) -> str:
     parts = [loc.get("name"), loc.get("admin1"), loc.get("country")]
     label = ", ".join(p for p in parts if p)
@@ -50,6 +52,7 @@ def format_location(loc: dict) -> str:
         label = f"{label} | {int(elevation)} m ASL"
 
     return label
+
 
 def map_df(loc: dict) -> pd.DataFrame:
     return pd.DataFrame({"lat": [loc["latitude"]], "lon": [loc["longitude"]]})
@@ -76,12 +79,13 @@ def daily_df_from_json(j: dict) -> pd.DataFrame:
 
 
 def snow_depth_daily_df(j: dict) -> pd.DataFrame | None:
-    hourly = (j.get("hourly") or {})
+    hourly = j.get("hourly") or {}
     times = hourly.get("time")
     depths = hourly.get("snow_depth")
     if times is None or depths is None:
         return None
 
+    # Archive snow depth is hourly; keep the daily maximum
     h = pd.DataFrame({"time": times, "snow_depth": depths})
     h["date"] = pd.to_datetime(h["time"]).dt.date
 
@@ -122,9 +126,9 @@ def fetch_daily(
     else:
         out = out.merge(snow_daily, on="date", how="left")
 
+    # Open-Meteo snow depth is in metres; convert to cm
     out["snow_depth"] = out["snow_depth"] * 100
     return out
-
 
 
 @st.cache_data(ttl=24 * 60 * 60)
@@ -137,8 +141,9 @@ def load_location(name: str):
 
 @st.cache_data(ttl=60 * 60)
 def load_daily(lat: float, lon: float, timezone: str) -> pd.DataFrame:
+    # Fetch the full window once, then slice to the selected days
     end = date.today()
-    start = end - timedelta(days=90)
+    start = end - timedelta(days=MAX_PAST_DAYS)
     return fetch_daily(lat, lon, start, end, timezone)
 
 
@@ -162,7 +167,7 @@ def render_location_header(location: str):
 def prepare_df(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["date"] = pd.to_datetime(df["date"])
-    df["tavg"] = (df["tmax"] + df["tmin"]) / 2
+    df["tavg"] = (df["tmax"] + df["tmin"]) / 2  # midpoint of daily min/max
     return df
 
 
@@ -176,7 +181,6 @@ def load_weather_df(loc: dict, days_back: int) -> pd.DataFrame:
     return df_all[df_all["date"] >= start].reset_index(drop=True)
 
 
-
 def show_metrics(df: pd.DataFrame):
     col1, col2, col3 = st.columns(3)
     col1.metric("Min temp (°C)", f"{df['tmin'].min():.1f}")
@@ -187,9 +191,9 @@ def show_metrics(df: pd.DataFrame):
 # -------------------------------
 # Plots
 # -------------------------------
-def apply_layout(fig, x_min, x_max, y_title: str, t: int, y_step: int):
+def apply_layout(fig, x_min, x_max, y_title: str, top_margin: int, y_step: int):
     fig.update_layout(
-        margin=dict(l=10, r=10, t=t, b=10),
+        margin=dict(l=10, r=10, t=top_margin, b=10),
         hovermode="x unified",
         xaxis_title=None,
         yaxis_title=y_title,
@@ -198,15 +202,18 @@ def apply_layout(fig, x_min, x_max, y_title: str, t: int, y_step: int):
 
     fig.update_xaxes(showgrid=True, range=[x_min, x_max])
 
-    # snap y range to step
     all_y = []
     for trace in fig.data:
         if hasattr(trace, "y") and trace.y is not None:
             all_y.extend(trace.y)
 
+    if not all_y:
+        return
+
     y_min = min(all_y)
     y_max = max(all_y)
 
+    # Snap the axis to y_step, with smaller ticks in between
     y_floor = int((y_min // y_step) * y_step)
     y_ceil = int(((y_max + y_step - 1) // y_step) * y_step)
 
@@ -218,7 +225,6 @@ def apply_layout(fig, x_min, x_max, y_title: str, t: int, y_step: int):
     )
 
 
-
 def plot_daily(df: pd.DataFrame, view: str):
     fig = go.Figure()
 
@@ -228,12 +234,13 @@ def plot_daily(df: pd.DataFrame, view: str):
     else:
         fig.add_trace(go.Scatter(x=df["date"], y=df["tavg"], mode="lines"))
 
-    apply_layout(fig, df["date"].min(), df["date"].max(), "°C", t=20, y_step=10)
+    apply_layout(fig, df["date"].min(), df["date"].max(), "°C", top_margin=20, y_step=10)
 
     st.plotly_chart(fig, width="stretch")
 
 
 def bin_time_series(df: pd.DataFrame, bins: int = 30) -> pd.DataFrame:
+    # Group into ~30 bars so the precip chart stays readable
     d = df[["date", "rain", "snowfall", "snow_depth"]].copy()
     d["date"] = pd.to_datetime(d["date"])
     n = min(bins, len(d))
@@ -253,7 +260,7 @@ def plot_precip(df: pd.DataFrame, view: str):
 
     if view == "Rain":
         fig.add_trace(go.Bar(x=agg["date"], y=agg["rain"], name="Rain (mm)", opacity=0.7))
-        apply_layout(fig, df["date"].min(), df["date"].max(), "mm", t=10, y_step=20)
+        apply_layout(fig, df["date"].min(), df["date"].max(), "mm", top_margin=10, y_step=20)
         st.plotly_chart(fig, width="stretch")
         return
 
@@ -268,8 +275,7 @@ def plot_precip(df: pd.DataFrame, view: str):
         )
     )
 
-
-    apply_layout(fig, df["date"].min(), df["date"].max(), "cm", t=10, y_step=20)
+    apply_layout(fig, df["date"].min(), df["date"].max(), "cm", top_margin=10, y_step=20)
     st.plotly_chart(fig, width="stretch")
 
 
