@@ -395,7 +395,9 @@ def main() -> None:
     if loc is None:
         return
 
-    with st.status("Loading forecast data...", expanded=False) as status:
+    load_status = st.empty()
+
+    with load_status.status("Loading forecast data...", expanded=False) as status:
         status.write("Fetching all forecast horizons once, then filtering locally.")
 
         try:
@@ -420,6 +422,8 @@ def main() -> None:
             future = empty_future_daily_temp()
 
         status.update(label="Forecast data ready", state="complete")
+
+    load_status.empty()
 
     render_metrics(scored)
     plot_pred_vs_actual(scored, future=future, temp_metric=temp_metric)
