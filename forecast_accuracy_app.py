@@ -150,6 +150,29 @@ def apply_page_styles() -> None:
                 box-shadow: none !important;
                 border-bottom: none !important;
             }
+
+            /* Keep Mean / Min / Max MAE in one compact row */
+            [data-testid="stHorizontalBlock"] {
+                flex-direction: row !important;
+                flex-wrap: nowrap !important;
+                gap: 0.35rem !important;
+            }
+            [data-testid="stHorizontalBlock"] > div,
+            [data-testid="column"] {
+                min-width: 0 !important;
+                flex: 1 1 0 !important;
+            }
+            [data-testid="stMetric"] {
+                padding: 0 !important;
+            }
+            [data-testid="stMetricValue"] {
+                font-size: 1.05rem !important;
+            }
+            [data-testid="stMetricLabel"],
+            [data-testid="stMetricLabel"] p {
+                font-size: 0.7rem !important;
+                line-height: 1.15 !important;
+            }
         }
         </style>
         """,
