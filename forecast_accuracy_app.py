@@ -174,11 +174,12 @@ def apply_page_styles() -> None:
                 line-height: 1.15 !important;
             }
 
-            /* 30% slimmer than Streamlit's default sidebar overlay */
-            section[data-testid="stSidebar"] {
-                min-width: 0 !important;
-                width: 70% !important;
-                max-width: 70% !important;
+            /* 30% slimmer than Streamlit 1.62's 300px default (210px).
+               Only override width so collapsed max-width: 0 still hides it. */
+            section[data-testid="stSidebar"],
+            section.stSidebar,
+            [data-testid="stSidebar"] {
+                width: 210px !important;
             }
         }
         </style>
