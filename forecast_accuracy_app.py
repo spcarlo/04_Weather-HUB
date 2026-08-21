@@ -173,6 +173,13 @@ def apply_page_styles() -> None:
                 font-size: 0.7rem !important;
                 line-height: 1.15 !important;
             }
+
+            /* 30% slimmer than Streamlit's default sidebar overlay */
+            section[data-testid="stSidebar"] {
+                min-width: 0 !important;
+                width: 70% !important;
+                max-width: 70% !important;
+            }
         }
         </style>
         """,
@@ -211,12 +218,12 @@ def render_location_control() -> str:
 def render_forecast_controls() -> tuple[int, int, str, bool]:
     with st.sidebar:
         horizon_days = st.slider(
-            "Forecast horizon (days ahead)",
+            "Forecast horizon",
             min_value=min(HORIZON_DAYS),
             max_value=max(HORIZON_DAYS),
             value=3,
         )
-        past_days = st.slider("Verify past days", min_value=7, max_value=MAX_PAST_DAYS, value=30)
+        past_days = st.slider("Past days", min_value=7, max_value=MAX_PAST_DAYS, value=30)
         plot_view = st.selectbox("Plot view", options=list(PLOT_VIEWS))
         show_future = st.toggle("Show future", value=False)
     return horizon_days, past_days, PLOT_VIEWS[plot_view], show_future
