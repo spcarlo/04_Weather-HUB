@@ -132,6 +132,25 @@ def apply_page_styles() -> None:
             position: absolute !important;
             overflow: hidden !important;
         }
+
+        /* Phones: native hamburger + enough top gap so the title is not covered */
+        @media (max-width: 767px) {
+            .block-container,
+            [data-testid="stMainBlockContainer"] {
+                padding-top: 4.5rem !important;
+            }
+            .sidebar-slot {
+                display: none !important;
+            }
+            [data-testid="stHeader"],
+            [data-testid="stToolbar"],
+            [data-testid="stAppToolbar"] {
+                background: var(--background-color) !important;
+                backdrop-filter: none !important;
+                box-shadow: none !important;
+                border-bottom: none !important;
+            }
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -272,11 +291,28 @@ def place_sidebar_toggle() -> None:
                 collapse.click();
             }
 
-            function parkExpand() {
-                const slot = doc.querySelector(".sidebar-slot");
-                const expandButtons = [...doc.querySelectorAll("[data-testid='stExpandSidebarButton']")];
-                const active = expandButtons.length ? expandButtons[expandButtons.length - 1] : null;
+            function resetExpand(el) {
+                el.style.position = "";
+                el.style.left = "";
+                el.style.top = "";
+                el.style.zIndex = "";
+                el.style.display = "";
+                el.style.visibility = "";
+                el.style.opacity = "";
+                el.style.margin = "";
+            }
 
+            function parkExpand() {
+                const expandButtons = [...doc.querySelectorAll("[data-testid='stExpandSidebarButton']")];
+
+                // Phones: leave Streamlit's native header hamburger in place
+                if (window.parent.innerWidth < 768) {
+                    expandButtons.forEach(resetExpand);
+                    return;
+                }
+
+                const slot = doc.querySelector(".sidebar-slot");
+                const active = expandButtons.length ? expandButtons[expandButtons.length - 1] : null;
                 expandButtons.forEach((el) => {
                     if (el !== active) el.style.display = "none";
                 });
