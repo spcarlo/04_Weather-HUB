@@ -1,9 +1,11 @@
+import html
 import math
 import time
 
 import requests
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 import plotly.graph_objects as go
 
 from forecast_accuracy_calculations import (
@@ -20,7 +22,123 @@ from forecast_accuracy_calculations import (
 # -------------------------------
 # Page
 # -------------------------------
-st.set_page_config(page_title="Forecast Accuracy", layout="centered")
+st.set_page_config(
+    page_title="Forecast Accuracy",
+    layout="centered",
+    initial_sidebar_state="collapsed",
+)
+
+
+def apply_page_styles() -> None:
+    # Keep title, metrics, and captions close in size so type doesn't shout
+    st.markdown(
+        """
+        <style>
+        h1 {
+            font-size: 1.65rem !important;
+            font-weight: 600 !important;
+        }
+        [data-testid="stHeaderActionElements"] {
+            display: none !important;
+        }
+        [data-testid="stCaptionContainer"] {
+            font-size: 0.95rem !important;
+        }
+        [data-testid="stMetricValue"] {
+            font-size: 1.5rem !important;
+            font-weight: 600 !important;
+        }
+        [data-testid="stMetricLabel"] {
+            font-size: 0.95rem !important;
+        }
+        [data-testid="stMetricLabel"] p {
+            font-size: 0.95rem !important;
+        }
+
+        /* Keep sidebar + menu buttons; only remove the opaque bar over the title */
+        [data-testid="stHeader"],
+        [data-testid="stToolbar"],
+        [data-testid="stAppToolbar"] {
+            background: transparent !important;
+            backdrop-filter: none !important;
+            box-shadow: none !important;
+            border-bottom: none !important;
+        }
+        [data-testid="stDecoration"] {
+            display: none !important;
+        }
+
+        /* Default Streamlit top padding is 6rem; keep a tight gap */
+        .block-container,
+        [data-testid="stMainBlockContainer"] {
+            padding-top: 1.5rem !important;
+        }
+
+        /* Sidebar chevron: keep Streamlit's own show/hide, only restyle the icon */
+        [data-testid="stExpandSidebarButton"],
+        [data-testid="stSidebarCollapseButton"] {
+            align-items: center !important;
+            width: auto !important;
+            overflow: visible !important;
+        }
+        [data-testid="stExpandSidebarButton"],
+        [data-testid="stSidebarCollapseButton"] button {
+            color: var(--text-color) !important;
+            background: transparent !important;
+            border: none !important;
+            min-width: 2.1rem !important;
+            min-height: 2.1rem !important;
+            padding: 0 !important;
+        }
+        [data-testid="stExpandSidebarButton"] svg,
+        [data-testid="stSidebarCollapseButton"] svg {
+            width: 1.55rem !important;
+            height: 1.55rem !important;
+            padding: 0.22rem !important;
+            color: var(--text-color) !important;
+            fill: var(--text-color) !important;
+            stroke: var(--text-color) !important;
+            opacity: 1 !important;
+            background: rgba(128, 128, 128, 0.22) !important;
+            border: 1px solid rgba(128, 128, 128, 0.45) !important;
+            border-radius: 0.45rem !important;
+            box-sizing: content-box !important;
+        }
+        .location-row {
+            display: flex;
+            align-items: center;
+            position: relative;
+            min-height: 2.1rem;
+            margin: 0.1rem 0 0.35rem 0;
+            overflow: visible;
+        }
+        .sidebar-slot {
+            display: inline-flex;
+            align-items: center;
+            position: absolute;
+            right: calc(100% + 0.85rem);
+            top: 50%;
+            transform: translateY(-50%);
+            width: 2.2rem;
+            height: 2.2rem;
+        }
+        .location-label {
+            font-size: 0.95rem;
+            opacity: 0.6;
+        }
+        [data-testid="stCustomComponentV1"] {
+            height: 0 !important;
+            width: 0 !important;
+            position: absolute !important;
+            overflow: hidden !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+apply_page_styles()
 
 st.title("Forecast Accuracy")
 st.caption("Compare past forecasts with measured weather")
@@ -34,13 +152,18 @@ PLOT_VIEWS = {
     "Min/max": "range",
     "Mean": "mean",
 }
+CHART_HEIGHT = 315  # 30% shorter than Plotly's default 450
 
 # -------------------------------
 # Controls
 # -------------------------------
-def render_controls() -> tuple[str, int, int, str]:
+def render_location_control() -> str:
     with st.sidebar:
-        location = st.text_input("Location", value="Zürich")
+        return st.text_input("Location", value="Zürich")
+
+
+def render_forecast_controls() -> tuple[int, int, str, bool]:
+    with st.sidebar:
         horizon_days = st.slider(
             "Forecast horizon (days ahead)",
             min_value=min(HORIZON_DAYS),
@@ -49,7 +172,8 @@ def render_controls() -> tuple[str, int, int, str]:
         )
         past_days = st.slider("Verify past days", min_value=7, max_value=MAX_PAST_DAYS, value=30)
         plot_view = st.selectbox("Plot view", options=list(PLOT_VIEWS))
-    return location, horizon_days, past_days, PLOT_VIEWS[plot_view]
+        show_future = st.toggle("Show future", value=False)
+    return horizon_days, past_days, PLOT_VIEWS[plot_view], show_future
 
 
 # -------------------------------
@@ -112,9 +236,98 @@ def render_location_header(location: str):
         st.error("Location not found")
         return None
 
-    st.caption(format_location(loc))
+    st.markdown(
+        f'<div class="location-row">'
+        f'<span class="location-label">{html.escape(format_location(loc))}</span>'
+        f'<span class="sidebar-slot"></span>'
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+    place_sidebar_toggle()
     st.map(map_df(loc), zoom=9, height=180)
     return loc
+
+
+def place_sidebar_toggle() -> None:
+    # Park the open-arrow over the slot next to Zürich. Do not touch the close button.
+    components.html(
+        """
+        <script>
+        (function() {
+            const doc = window.parent.document;
+            let placing = false;
+
+            function collapseSidebarOnFirstLoad() {
+                if (window.parent.__hubDidInitialCollapse) return;
+                const expand = doc.querySelector("[data-testid='stExpandSidebarButton']");
+                if (expand) {
+                    window.parent.__hubDidInitialCollapse = true;
+                    return;
+                }
+                const collapse =
+                    doc.querySelector("[data-testid='stSidebarCollapseButton'] button") ||
+                    doc.querySelector("[data-testid='stSidebarCollapseButton']");
+                if (!collapse) return;
+                window.parent.__hubDidInitialCollapse = true;
+                collapse.click();
+            }
+
+            function parkExpand() {
+                const slot = doc.querySelector(".sidebar-slot");
+                const expandButtons = [...doc.querySelectorAll("[data-testid='stExpandSidebarButton']")];
+                const active = expandButtons.length ? expandButtons[expandButtons.length - 1] : null;
+
+                expandButtons.forEach((el) => {
+                    if (el !== active) el.style.display = "none";
+                });
+                if (!slot || !active) return;
+
+                const r = slot.getBoundingClientRect();
+                active.style.position = "fixed";
+                active.style.left = Math.max(8, r.left) + "px";
+                active.style.top = r.top + Math.max(0, (r.height - 34) / 2) + "px";
+                active.style.zIndex = "1002";
+                active.style.display = "inline-flex";
+                active.style.visibility = "visible";
+                active.style.opacity = "1";
+                active.style.margin = "0";
+            }
+
+            function place() {
+                if (placing) return;
+                placing = true;
+                try {
+                    collapseSidebarOnFirstLoad();
+                    parkExpand();
+                } finally {
+                    placing = false;
+                }
+            }
+
+            place();
+            window.parent.__hubParkExpand = parkExpand;
+            if (!window.parent.__hubSidebarToggleListeners) {
+                window.parent.__hubSidebarToggleListeners = true;
+                window.parent.addEventListener("resize", function() {
+                    if (window.parent.__hubParkExpand) window.parent.__hubParkExpand();
+                });
+                window.parent.addEventListener("scroll", function() {
+                    if (window.parent.__hubParkExpand) window.parent.__hubParkExpand();
+                }, true);
+            }
+            if (window.parent.__hubSidebarToggleObserver) {
+                window.parent.__hubSidebarToggleObserver.disconnect();
+            }
+            window.parent.__hubSidebarToggleObserver = new MutationObserver(place);
+            window.parent.__hubSidebarToggleObserver.observe(doc.body, {
+                childList: true,
+                subtree: true,
+            });
+        })();
+        </script>
+        """,
+        height=0,
+    )
 
 
 def fetch_previous_runs_temp(lat: float, lon: float, past_days: int, timezone: str) -> dict:
@@ -211,13 +424,14 @@ def load_future_daily_temp(lat: float, lon: float, days: int, timezone: str) -> 
     )
 
 
-def forecast_data_key(loc: dict, horizon_days: int, past_days: int, timezone: str) -> tuple:
-    return (loc["latitude"], loc["longitude"], horizon_days, past_days, timezone)
+def location_data_key(loc: dict, timezone: str) -> tuple:
+    return (loc["latitude"], loc["longitude"], timezone)
 
 
-def load_scored_for_location(loc: dict, horizon_days: int, past_days: int, timezone: str) -> pd.DataFrame:
-    scored_all = load_scored_max_window(loc["latitude"], loc["longitude"], timezone)
+def filter_scored(scored_all: pd.DataFrame, horizon_days: int, past_days: int) -> pd.DataFrame:
     scored_horizon = scored_all[scored_all["horizon_days"] == horizon_days]
+    if scored_horizon.empty:
+        return scored_horizon.reset_index(drop=True)
 
     end = scored_horizon["date"].max()
     start = end - pd.Timedelta(days=past_days - 1)  # inclusive window
@@ -386,17 +600,17 @@ def add_temperature_line(
 def plot_mean_forecast(scored: pd.DataFrame, future: pd.DataFrame) -> None:
     fig = go.Figure()
 
-    add_temperature_line(fig, scored, "temp_pred_mean", "old forecast mean", "#F4A261")
-    add_temperature_line(fig, scored, "temp_actual_mean", "measured mean", "#4CAF50")
+    add_temperature_line(fig, scored, "temp_pred_mean", "forecast", "#F4A261")
+    add_temperature_line(fig, scored, "temp_actual_mean", "measured", "#4CAF50")
 
     if not future.empty:
         future_plot = connect_future_to_last_actual(scored, future)
-        add_temperature_line(fig, future_plot, "temp_future_mean", "forecast mean", "#5B8DB8", dash="dot")
+        add_temperature_line(fig, future_plot, "temp_future_mean", "future", "#5B8DB8", dash="dot")
 
     x_min, x_max = x_range(scored, future)
     apply_layout(fig, x_min, x_max, "°C", top_margin=10, y_values_source=temperature_axis_values(scored, future))
 
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, width="stretch", height=CHART_HEIGHT)
 
 
 def plot_min_max_forecast(scored: pd.DataFrame, future: pd.DataFrame) -> None:
@@ -407,7 +621,7 @@ def plot_min_max_forecast(scored: pd.DataFrame, future: pd.DataFrame) -> None:
         scored,
         min_col="temp_actual_min",
         max_col="temp_actual_max",
-        name="measured min/max",
+        name="measured",
         color="#4CAF50",
     )
     add_temperature_range_lines(
@@ -415,7 +629,7 @@ def plot_min_max_forecast(scored: pd.DataFrame, future: pd.DataFrame) -> None:
         scored,
         min_col="temp_pred_min",
         max_col="temp_pred_max",
-        name="old forecast min/max",
+        name="forecast",
         color="#F4A261",
     )
 
@@ -426,7 +640,7 @@ def plot_min_max_forecast(scored: pd.DataFrame, future: pd.DataFrame) -> None:
             future_plot,
             min_col="temp_future_min",
             max_col="temp_future_max",
-            name="forecast min/max",
+            name="future",
             color="#5B8DB8",
             dash="dot",
         )
@@ -434,7 +648,7 @@ def plot_min_max_forecast(scored: pd.DataFrame, future: pd.DataFrame) -> None:
     x_min, x_max = x_range(scored, future)
     apply_layout(fig, x_min, x_max, "°C", top_margin=10, y_values_source=temperature_axis_values(scored, future))
 
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, width="stretch", height=CHART_HEIGHT)
 
 
 def plot_pred_vs_actual(scored: pd.DataFrame, future: pd.DataFrame, plot_view: str) -> None:
@@ -480,73 +694,87 @@ def render_data(scored: pd.DataFrame) -> None:
         st.dataframe(scored[visible_cols], width="stretch", hide_index=True)
 
 
-def get_cached_forecast_data(data_key: tuple):
-    # Skip the loading UI when only the plot view changes
+def get_cached_location_data(data_key: tuple):
     cached = st.session_state.get("forecast_accuracy_data")
     if cached is None or cached.get("key") != data_key:
         return None
 
-    return cached["scored"], cached["future"]
+    return cached["scored_all"], cached["future"]
 
 
-def set_cached_forecast_data(data_key: tuple, scored: pd.DataFrame, future: pd.DataFrame) -> None:
+def set_cached_location_data(data_key: tuple, scored_all: pd.DataFrame, future: pd.DataFrame) -> None:
     st.session_state.forecast_accuracy_data = {
         "key": data_key,
-        "scored": scored,
+        "scored_all": scored_all,
         "future": future,
     }
+
+
+def load_location_forecast_data(loc: dict, timezone: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    scored_all = load_scored_max_window(loc["latitude"], loc["longitude"], timezone)
+
+    try:
+        future = load_future_daily_temp(loc["latitude"], loc["longitude"], days=7, timezone=timezone)
+    except requests.RequestException:
+        st.warning("Future forecast is temporarily unavailable.")
+        future = empty_future_daily_temp()
+
+    return scored_all, future
+
+
+def ensure_location_forecast_data(loc: dict, timezone: str):
+    # Keep the full window in session so slider changes only filter locally
+    data_key = location_data_key(loc, timezone)
+    cached = get_cached_location_data(data_key)
+    if cached is not None:
+        return cached
+
+    try:
+        with st.spinner("Loading forecast data..."):
+            scored_all, future = load_location_forecast_data(loc, timezone)
+    except requests.RequestException as e:
+        st.error("Could not load forecast accuracy data. Please try again in a moment.")
+        st.caption(str(e))
+        return None
+
+    if scored_all.empty:
+        st.warning("No data returned for this selection.")
+        return None
+
+    set_cached_location_data(data_key, scored_all, future)
+    return scored_all, future
+
+
+@st.fragment
+def render_forecast_panel(loc: dict) -> None:
+    horizon_days, past_days, plot_view, show_future = render_forecast_controls()
+    data = ensure_location_forecast_data(loc, TIMEZONE)
+    if data is None:
+        return
+
+    scored_all, future = data
+    scored = filter_scored(scored_all, horizon_days, past_days)
+    if scored.empty:
+        st.warning("No data returned for this selection.")
+        return
+
+    plot_future = future if show_future else empty_future_daily_temp()
+    render_metrics(scored)
+    plot_pred_vs_actual(scored, future=plot_future, plot_view=plot_view)
+    render_data(scored)
 
 
 # -------------------------------
 # Run
 # -------------------------------
 def main() -> None:
-    location, horizon_days, past_days, plot_view = render_controls()
+    location = render_location_control()
 
     loc = render_location_header(location)
     if loc is None:
         return
 
-    data_key = forecast_data_key(loc, horizon_days, past_days, TIMEZONE)
-    cached_data = get_cached_forecast_data(data_key)
-
-    if cached_data is None:
-        load_status = st.empty()
-
-        with load_status.status("Loading forecast data...", expanded=False) as status:
-            status.write("Fetching all forecast horizons once, then filtering locally.")
-
-            try:
-                scored = load_scored_for_location(loc, horizon_days, past_days, TIMEZONE)
-            except requests.RequestException as e:
-                status.update(label="Forecast accuracy data unavailable", state="error")
-                st.error("Could not load forecast accuracy data. Please try again in a moment.")
-                st.caption(str(e))
-                return
-
-            if scored.empty:
-                status.update(label="No forecast accuracy data returned", state="error")
-                st.warning("No data returned for this selection.")
-                return
-
-            status.write("Loading the current min/max forecast range.")
-
-            try:
-                future = load_future_daily_temp(loc["latitude"], loc["longitude"], days=7, timezone=TIMEZONE)
-            except requests.RequestException:
-                st.warning("Future forecast is temporarily unavailable.")
-                future = empty_future_daily_temp()
-
-            set_cached_forecast_data(data_key, scored, future)
-            status.update(label="Forecast data ready", state="complete")
-
-        load_status.empty()
-    else:
-        scored, future = cached_data
-
-    render_metrics(scored)
-    plot_pred_vs_actual(scored, future=future, plot_view=plot_view)
-    render_data(scored)
+    render_forecast_panel(loc)
 
 
 if __name__ == "__main__":
