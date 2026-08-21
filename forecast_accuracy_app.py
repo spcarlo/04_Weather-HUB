@@ -195,6 +195,10 @@ PLOT_VIEWS = {
     "Mean": "mean",
 }
 CHART_HEIGHT = 315  # 30% shorter than Plotly's default 450
+PLOT_CONFIG = {
+    "displayModeBar": False,
+    "staticPlot": True,
+}
 
 # -------------------------------
 # Controls
@@ -501,12 +505,13 @@ def filter_scored(scored_all: pd.DataFrame, horizon_days: int, past_days: int) -
 # -------------------------------
 # Plots
 # -------------------------------
-def apply_layout(fig, x_min, x_max, y_title: str, top_margin: int, y_values_source=None) -> None:
+def apply_layout(fig, x_min, x_max, top_margin: int, y_values_source=None) -> None:
     fig.update_layout(
         margin=dict(l=10, r=10, t=top_margin, b=10),
-        hovermode="x unified",
+        hovermode=False,
+        dragmode=False,
         xaxis_title=None,
-        yaxis_title=y_title,
+        yaxis_title=None,
         showlegend=True,
         legend=dict(
             orientation="h",
@@ -514,14 +519,17 @@ def apply_layout(fig, x_min, x_max, y_title: str, top_margin: int, y_values_sour
             y=-0.2,
             xanchor="center",
             x=0.5,
-            groupclick="togglegroup",
+            itemclick=False,
+            itemdoubleclick=False,
         ),
     )
+    fig.update_traces(hoverinfo="skip", hovertemplate=None)
 
     fig.update_xaxes(
         showgrid=True,
         range=[x_min, x_max],
         tickformat="%d.%m",
+        fixedrange=True,
     )
 
     # Snap ticks to 5 °C. Min/max values keep mean and range views on the same scale.
@@ -553,6 +561,7 @@ def apply_layout(fig, x_min, x_max, y_title: str, top_margin: int, y_values_sour
         range=[y_floor, y_ceil],
         tick0=y_floor,
         dtick=y_step,
+        fixedrange=True,
     )
 
 
@@ -615,7 +624,7 @@ def add_temperature_range_lines(
             legendgroup=name,
             showlegend=True,
             line=line,
-            hovertemplate=f"{name} min: %{{y:.1f}} °C<extra></extra>",
+            hoverinfo="skip",
         )
     )
     fig.add_trace(
@@ -627,7 +636,7 @@ def add_temperature_range_lines(
             legendgroup=name,
             showlegend=False,
             line=line,
-            hovertemplate=f"{name} max: %{{y:.1f}} °C<extra></extra>",
+            hoverinfo="skip",
         )
     )
 
@@ -651,7 +660,7 @@ def add_temperature_line(
             mode="lines",
             name=name,
             line=line,
-            hovertemplate=f"{name}: %{{y:.1f}} °C<extra></extra>",
+            hoverinfo="skip",
         )
     )
 
@@ -667,9 +676,9 @@ def plot_mean_forecast(scored: pd.DataFrame, future: pd.DataFrame) -> None:
         add_temperature_line(fig, future_plot, "temp_future_mean", "future", "#5B8DB8", dash="dot")
 
     x_min, x_max = x_range(scored, future)
-    apply_layout(fig, x_min, x_max, "°C", top_margin=10, y_values_source=temperature_axis_values(scored, future))
+    apply_layout(fig, x_min, x_max, top_margin=10, y_values_source=temperature_axis_values(scored, future))
 
-    st.plotly_chart(fig, width="stretch", height=CHART_HEIGHT)
+    st.plotly_chart(fig, width="stretch", height=CHART_HEIGHT, config=PLOT_CONFIG)
 
 
 def plot_min_max_forecast(scored: pd.DataFrame, future: pd.DataFrame) -> None:
@@ -705,9 +714,9 @@ def plot_min_max_forecast(scored: pd.DataFrame, future: pd.DataFrame) -> None:
         )
 
     x_min, x_max = x_range(scored, future)
-    apply_layout(fig, x_min, x_max, "°C", top_margin=10, y_values_source=temperature_axis_values(scored, future))
+    apply_layout(fig, x_min, x_max, top_margin=10, y_values_source=temperature_axis_values(scored, future))
 
-    st.plotly_chart(fig, width="stretch", height=CHART_HEIGHT)
+    st.plotly_chart(fig, width="stretch", height=CHART_HEIGHT, config=PLOT_CONFIG)
 
 
 def plot_pred_vs_actual(scored: pd.DataFrame, future: pd.DataFrame, plot_view: str) -> None:
